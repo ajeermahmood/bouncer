@@ -223,8 +223,12 @@ const description =
         <p>
           A gate takes files and returns findings. No filesystem, no git, no printing.
           All the input gathering lives in the runner. That is why the same modules run
-          in CI, inside the Cloudflare Worker behind the playground above, and in the
-          tests, with no second implementation to drift.
+          in four places with no second implementation to drift, and all four are live
+          so you can check rather than take my word for it:
+          <a href="https://www.npmjs.com/package/bouncer-gates">the CLI on npm</a>,
+          the Cloudflare Worker behind the playground above,
+          <a href="https://bouncer-production-9470.up.railway.app/health">a Node service on Railway</a>,
+          and your own browser tab whenever that Worker cannot be reached.
         </p>
       </div>
 

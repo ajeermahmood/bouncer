@@ -4,11 +4,11 @@ Three targets, one repository. Each one exists to run the same gate modules in a
 different runtime, which is the point rather than a flourish: it is what proves
 there is a single implementation of every rule.
 
-| Target | Serves | Config |
-|---|---|---|
-| Cloudflare Workers | the site and `/api/scan` | `wrangler.toml`, `worker/index.js` |
-| Railway | the hosted API on its own | `railway.json`, `server/index.mjs` |
-| npm | the CLI | `package.json` (`bouncer-gates`) |
+| Target | Serves | Live | Config |
+|---|---|---|---|
+| Cloudflare Workers | the site and `/api/scan` | [bouncer.ajeermdk001.workers.dev](https://bouncer.ajeermdk001.workers.dev) | `wrangler.toml`, `worker/index.js` |
+| Railway | the hosted API on its own | [bouncer-production-9470.up.railway.app](https://bouncer-production-9470.up.railway.app/health) | `railway.json`, `server/index.mjs` |
+| npm | the CLI | [`bouncer-gates`](https://www.npmjs.com/package/bouncer-gates) | `package.json` |
 
 ---
 
@@ -68,10 +68,10 @@ loop.
 Verify:
 
 ```bash
-curl https://<your-app>.up.railway.app/health
+curl https://bouncer-production-9470.up.railway.app/health
 # {"ok":true,"gates":["secrets","scope","money"]}
 
-curl -X POST https://<your-app>.up.railway.app/scan \
+curl -X POST https://bouncer-production-9470.up.railway.app/scan \
   -H "content-type: application/json" \
   -d '{"code":"const minor = Math.round(parseFloat(input) * 100);"}'
 # one money/float-to-minor finding

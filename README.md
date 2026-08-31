@@ -199,10 +199,16 @@ opens the file. A deliberate usability cost, paid on purpose.
 **Gates are pure functions.** A gate takes `{path, text}[]` and returns findings.
 No filesystem, no git, no printing; all input gathering lives in the runner. That
 is not tidiness. It is why the same modules run in four places with no duplicated
-rule logic: [the CLI](bin/bouncer.mjs), [a Cloudflare Worker](functions/api/scan.js),
-[a Node service on Railway](server/index.mjs), and [the browser
-playground](src/components/Playground.tsx). A gate needing git history takes the
-history as an argument.
+rule logic, and all four are live so you can check rather than take my word:
+
+| Runtime | Where | Check it |
+|---|---|---|
+| Node CLI | [`bin/bouncer.mjs`](bin/bouncer.mjs) | `npx bouncer-gates --version` |
+| Cloudflare Worker | [`worker/index.js`](worker/index.js) | [POST /api/scan](https://bouncer.ajeermdk001.workers.dev) |
+| Node on Railway | [`server/index.mjs`](server/index.mjs) | [GET /health](https://bouncer-production-9470.up.railway.app/health) |
+| Browser | [`Playground.tsx`](src/components/Playground.tsx) | the playground, offline |
+
+A gate needing git history takes the history as an argument.
 
 **Half the tests assert that gates stay quiet.** Catching the bad case is easy.
 Not firing on the twenty near-misses around it is the difference between a gate

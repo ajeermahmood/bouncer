@@ -26,6 +26,13 @@ const SCOPE_CONFIG = {
   rawAccessor: "raw",
 };
 
+/** Two gates cannot answer for a single pasted snippet. Said out loud, in every
+ *  response, rather than left for the caller to work out. */
+const UNAVAILABLE = [
+  { gate: "migration-safety", reason: "needs git history to know which migrations are new" },
+  { gate: "doc-links", reason: "needs the repository file list to check a link resolves" },
+];
+
 const server = createServer((req, res) => {
   const send = (status, data) => {
     const body = JSON.stringify(data);
@@ -104,7 +111,11 @@ const server = createServer((req, res) => {
     }
 
     findings.sort((a, b) => a.line - b.line);
-    send(crashed.length ? 500 : 200, { findings, crashed });
+    // Say which gates did not run, rather than returning three gates' findings
+    // and letting the caller believe all five were applied. Same reason the CLI
+    // prints "skipped" with a reason instead of quietly passing: a response that
+    // looks complete but is not is the failure this whole project is about.
+    send(crashed.length ? 500 : 200, { findings, crashed, unavailable: UNAVAILABLE });
   });
 });
 
