@@ -2,7 +2,7 @@
 
 **CI gates that let anyone contribute to a codebase without being able to break it.**
 
-Live demo: [bouncer.pages.dev](https://bouncer.pages.dev) - paste code into the
+Live demo: [bouncer.ajeermdk001.workers.dev](https://bouncer.ajeermdk001.workers.dev) - paste code into the
 playground and the real gate modules run on it.
 
 ```bash
@@ -250,7 +250,7 @@ npm run bench -- ../some-repo   # measure against a real codebase
 npm run dev                     # the site
 ```
 
-The site is Astro with SCSS on Cloudflare Pages. Its own pull requests go through
+The site is Astro with SCSS on Cloudflare Workers. Its own pull requests go through
 the gates it describes.
 
 ## Licence

@@ -2,6 +2,22 @@
 
 Notable changes. Dates are the day the work was done.
 
+## 0.2.2 - 2026-08-31
+
+- **The install command was wrong.** Every doc said `npx bouncer`. That name
+  belongs to an unrelated package already on npm at 0.0.5, so the first command in
+  the README would have downloaded and run a stranger's code. Published as
+  `bouncer-gates`; the binary it installs is still `bouncer`.
+- **Added a Cloudflare Worker entry** (`worker/index.js` and `wrangler.toml`) so
+  `/api/scan` exists on a Workers deployment. `functions/api/scan.js` is the Pages
+  convention and Workers ignores it, so the first deployment served the static 404
+  page for that route and the playground fell back to running in the browser. It
+  worked, which is what made it hard to notice: the fallback covered the outage
+  completely. The footer naming which runtime answered is the only reason this was
+  visible at all.
+- Corrected the homepage and `site` URL, which pointed at a `pages.dev` address
+  that was never created.
+
 ## 0.2.1 - 2026-08-31
 
 - `doc-links` no longer reports a root-absolute link with no file extension as

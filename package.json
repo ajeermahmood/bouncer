@@ -1,6 +1,6 @@
 {
   "name": "bouncer-gates",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "CI gates that let anyone contribute to a codebase without being able to break it.",
   "type": "module",
   "license": "MIT",
@@ -54,7 +54,7 @@
     "code-review",
     "devtools"
   ],
-  "homepage": "https://bouncer.pages.dev",
+  "homepage": "https://bouncer.ajeermdk001.workers.dev",
   "bugs": {
     "url": "https://github.com/ajeermahmood/bouncer/issues"
   }

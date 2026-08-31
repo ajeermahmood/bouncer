@@ -8,7 +8,8 @@ gates/*.mjs          pure: (files) -> findings.  no fs, no git, no printing
 gates/index.mjs      the registry: what each gate needs, when it must skip
 gates/lib/           finding shape, acknowledgement parsing, fingerprints, baseline
 bin/bouncer.mjs      the runner: git, file reads, config, baseline, reporting
-functions/api/       Cloudflare Pages Function
+worker/index.js      Cloudflare Worker: the API route, assets behind it
+functions/api/       the same endpoint for a Cloudflare Pages deployment
 server/index.mjs     Node service for Railway
 src/                 Astro site, with a browser-side caller
 ```
@@ -24,9 +25,19 @@ four places:
 | Caller | Runtime | Why it exists |
 |---|---|---|
 | `bin/bouncer.mjs` | Node CLI | CI, pre-commit, local |
-| `functions/api/scan.js` | Cloudflare Worker | the playground; no filesystem exists there |
+| `worker/index.js` | Cloudflare Worker | the deployed playground; no filesystem exists there |
+| `functions/api/scan.js` | Cloudflare Pages Function | the same endpoint, for a Pages deployment |
 | `server/index.mjs` | Node service on Railway | a hosted API for teams not running Node |
 | `src/components/Playground.tsx` | browser | works with no server at all |
+
+Workers and Pages need different plumbing for the same route, and the difference
+is silent when you get it wrong. Pages compiles `functions/api/scan.js` by
+convention; Workers ignores that directory entirely and expects one entry that
+routes what it wants and hands the rest to an assets binding. The first
+deployment of this site went out as a Worker, so `/api/scan` returned the static
+404 page and the playground quietly fell back to running in the browser, exactly
+as designed. The fallback worked so well it hid the outage. That is the real
+hazard of a good fallback, and it is why the footer names which runtime answered.
 
 A playground with its own copy of the regexes would drift from the real gates
 within a month and start teaching visitors something false. There is nothing to

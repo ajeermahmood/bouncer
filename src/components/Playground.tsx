@@ -9,7 +9,7 @@ import * as money from "../../gates/money.mjs";
  * The playground runs the gates two ways, and which one answered is shown in the
  * footer rather than hidden.
  *
- * PRIMARY: POST to /api/scan, a Cloudflare Pages Function. That is the honest
+ * PRIMARY: POST to /api/scan, which runs on a Cloudflare Worker. That is the honest
  * demonstration, because it is the same path a CI run takes: server side, on the
  * real modules, with no browser involved.
  *

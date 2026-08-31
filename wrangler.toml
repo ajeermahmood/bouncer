@@ -1,0 +1,21 @@
+# Cloudflare Workers deployment.
+#
+# Astro builds the static site into dist/. This Worker serves the API route and
+# hands every other request to the assets binding, so the whole thing is one
+# deployment rather than a site plus a separate service.
+#
+# On Pages none of this is needed: functions/api/scan.js is picked up by
+# convention. That file is kept for anyone deploying this to Pages instead, and
+# both entries import the same gate modules.
+
+name = "bouncer"
+main = "worker/index.js"
+compatibility_date = "2026-01-01"
+
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+# Serve the static file when one matches, and only fall through to the Worker
+# when none does. Without this the Worker runs on every asset request too, which
+# is slower and pointless.
+not_found_handling = "404-page"
