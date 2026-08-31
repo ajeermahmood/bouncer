@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import s from "./Playground.module.scss";
 
-import * as secrets from "../../gates/secrets.mjs";
-import * as scope from "../../gates/scope.mjs";
-import * as money from "../../gates/money.mjs";
+import { UNAVAILABLE } from "../../shared/demo-config.mjs";
+import { runDemoGates } from "../../shared/demo-scan.mjs";
 
 /**
  * The playground runs the gates two ways, and which one answered is shown in the
@@ -31,13 +30,6 @@ type Finding = {
   message: string;
   fix?: string;
   severity: "error" | "warn";
-};
-
-const SCOPE_CONFIG = {
-  models: ["order", "customer", "invoice", "subscription", "payment"],
-  tables: ["orders", "customers", "invoices", "subscriptions", "payments"],
-  column: "tenantId",
-  rawAccessor: "raw",
 };
 
 const PRESETS: { label: string; code: string }[] = [
@@ -118,13 +110,9 @@ const PRESETS: { label: string; code: string }[] = [
 ];
 
 function runLocally(code: string, filename: string): Finding[] {
-  const files = [{ path: filename, text: code }];
-  const out: Finding[] = [
-    ...secrets.scan(files),
-    ...scope.scan(files, SCOPE_CONFIG),
-    ...money.scan(files),
-  ];
-  return out.sort((a, b) => a.line - b.line);
+  // The same function the Worker calls, so the fallback cannot answer differently
+  // from the server it is standing in for.
+  return runDemoGates(code, filename).findings as Finding[];
 }
 
 export default function Playground() {
@@ -235,6 +223,24 @@ export default function Playground() {
               </div>
             ))
           )}
+          {/*
+            Name the gates that did not run.
+
+            Three of the five can answer for a pasted snippet; migration-safety
+            needs git history and doc-links needs the repository file list. The
+            API has always returned that in an `unavailable` array, and this
+            component quietly dropped it, so the page showed three gates' results
+            while implying five ran. That is exactly what the CLI refuses to do
+            when it prints "skipped" with a reason rather than passing, and it
+            should not be different here just because it is a demo.
+          */}
+          {ranOn ? (
+            <span className={s.footNote}>
+              {" \u00b7 "}
+              {UNAVAILABLE.map((u) => u.gate).join(" and ")} need a repository, so they
+              cannot run here
+            </span>
+          ) : null}
         </div>
 
         <div className={s.foot}>

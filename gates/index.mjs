@@ -73,6 +73,3 @@ export const GATES = [
   },
 ];
 
-export function gateByName(n) {
-  return GATES.find((g) => g.name === n);
-}

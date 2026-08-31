@@ -12,26 +12,10 @@
  * hosted API for a team that does not run Node, and on a marketing site.
  */
 import { createServer } from "node:http";
-import * as secrets from "../gates/secrets.mjs";
-import * as scope from "../gates/scope.mjs";
-import * as money from "../gates/money.mjs";
+import { MAX_SNIPPET_BYTES } from "../shared/demo-config.mjs";
+import { runDemoGates } from "../shared/demo-scan.mjs";
 
 const PORT = Number(process.env.PORT) || 8080;
-const MAX_BYTES = 64 * 1024;
-
-const SCOPE_CONFIG = {
-  models: ["order", "customer", "invoice", "subscription", "payment"],
-  tables: ["orders", "customers", "invoices", "subscriptions", "payments"],
-  column: "tenantId",
-  rawAccessor: "raw",
-};
-
-/** Two gates cannot answer for a single pasted snippet. Said out loud, in every
- *  response, rather than left for the caller to work out. */
-const UNAVAILABLE = [
-  { gate: "migration-safety", reason: "needs git history to know which migrations are new" },
-  { gate: "doc-links", reason: "needs the repository file list to check a link resolves" },
-];
 
 const server = createServer((req, res) => {
   const send = (status, data) => {
@@ -68,7 +52,7 @@ const server = createServer((req, res) => {
   const chunks = [];
   req.on("data", (c) => {
     size += c.length;
-    if (size > MAX_BYTES) {
+    if (size > MAX_SNIPPET_BYTES) {
       req.destroy();
       return;
     }
@@ -90,32 +74,14 @@ const server = createServer((req, res) => {
     const code = typeof body.code === "string" ? body.code : "";
     const filename =
       typeof body.filename === "string" && body.filename ? body.filename : "snippet.ts";
-    if (!code.trim()) return send(200, { findings: [], crashed: [] });
+    if (!code.trim()) return send(200, runDemoGates(""));
 
-    const files = [{ path: filename, text: code }];
-    const findings = [];
-    const crashed = [];
-
-    // A gate that throws must not read as a pass. Same rule as the CLI and the
-    // Worker; it is the one invariant that is worth repeating in every caller.
-    for (const [gate, run] of [
-      ["secrets", () => secrets.scan(files)],
-      ["scope", () => scope.scan(files, SCOPE_CONFIG)],
-      ["money", () => money.scan(files)],
-    ]) {
-      try {
-        findings.push(...run());
-      } catch (e) {
-        crashed.push({ gate, message: e.message });
-      }
-    }
-
-    findings.sort((a, b) => a.line - b.line);
+    const { findings, crashed, unavailable } = runDemoGates(code, filename);
     // Say which gates did not run, rather than returning three gates' findings
     // and letting the caller believe all five were applied. Same reason the CLI
     // prints "skipped" with a reason instead of quietly passing: a response that
     // looks complete but is not is the failure this whole project is about.
-    send(crashed.length ? 500 : 200, { findings, crashed, unavailable: UNAVAILABLE });
+    send(crashed.length ? 500 : 200, { findings, crashed, unavailable });
   });
 });
 

@@ -6,8 +6,9 @@ that does all the I/O, and four thin callers.
 ```
 gates/*.mjs          pure: (files) -> findings.  no fs, no git, no printing
 gates/index.mjs      the registry: what each gate needs, when it must skip
-gates/lib/           finding shape, acknowledgement parsing, fingerprints, baseline
+gates/lib/           finding shape, acknowledgements, fingerprints, baseline, glob
 bin/bouncer.mjs      the runner: git, file reads, config, baseline, reporting
+shared/demo-*.mjs    the config and scan the hosted demos share
 worker/index.js      Cloudflare Worker: the API route, assets behind it
 functions/api/       the same endpoint for a Cloudflare Pages deployment
 server/index.mjs     Node service for Railway
@@ -72,6 +73,24 @@ The first means we looked and there was nothing to check. The second means we
 could not look at all. An early version rendered both as the first, so a shallow
 CI clone printed the reassuring message while checking nothing, and would have
 kept doing that indefinitely.
+
+## One rule, one implementation, four callers
+
+The gate logic was shared from the start. What was not shared, for several
+releases, was everything around it: which gates a hosted endpoint runs, the
+try/catch that stops a throwing gate from reading as a pass, the sort order, and
+the response shape. That was copy-pasted into the Worker, the Pages Function, the
+Railway service and the browser playground, along with the scope config itself.
+
+Which means the central claim was true of the rules and unverified for the rest.
+Adding a tenant-owned model would have updated one caller and left three
+answering differently, silently, forever.
+
+It now lives in `shared/demo-scan.mjs` and `shared/demo-config.mjs`, and
+`tests/demo-parity.test.mjs` asserts that no caller imports a gate directly.
+That test exists because "we share the important part" is the easy half; the
+important part is whatever actually differs between two runs, and configuration
+usually is.
 
 ## A gate never fails open
 

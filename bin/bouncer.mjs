@@ -16,6 +16,7 @@ import { execFileSync } from "node:child_process";
 import { resolve, join } from "node:path";
 import { GATES } from "../gates/index.mjs";
 import { lines } from "../gates/lib/finding.mjs";
+import { globToRe } from "../gates/lib/glob.mjs";
 import {
   fingerprintAll,
   createBaseline,
@@ -23,7 +24,7 @@ import {
   validateBaseline,
 } from "../gates/lib/baseline.mjs";
 
-const VERSION = "0.2.3";
+const VERSION = "0.2.4";
 
 const HELP = `bouncer ${VERSION}
 CI gates that let anyone contribute without being able to break things.
@@ -153,49 +154,31 @@ function loadJson(path, label) {
   }
 }
 
-function read(path) {
-  try {
-    const buf = readFileSync(join(ROOT, path));
-    if (buf.length > TEXT_MAX) return null;
-    if (buf.includes(0)) return null; // binary
-    return buf.toString("utf8");
-  } catch {
-    return null;
-  }
-}
-
 /**
- * Turn one config `exclude` entry into a matcher.
+ * Read a tracked file, or say why not.
  *
- * Deliberately tiny and deliberately single-pass: a double star spans
- * directories, a single star stops at a slash, everything else is literal. No
- * dependency, and no ambiguity about which flavour of glob this is.
+ * Returning a reason rather than a bare null is the same rule the gates follow.
+ * A file that cannot be read is a file that is not scanned, and an earlier
+ * version dropped those silently, so a source file could sit in the repository
+ * being checked by nothing at all while the run reported green.
  *
- * Written as a character walk rather than a chain of replaces because that chain
- * has an ordering hazard: expanding the single star first corrupts any double
- * star not yet handled, and the usual fix is placeholder tokens that then have to
- * be impossible to collide with. One pass has no ordering to get wrong.
+ * That is not hypothetical. `gates/lib/finding.mjs` used raw NUL bytes as
+ * fingerprint separators, which made it binary, which made this function skip it.
+ * The tool's own core library was invisible to the tool for several releases, and
+ * nothing in the output hinted at it.
+ *
+ * @returns {{text: string} | {reason: string}}
  */
-export function globToRe(pattern) {
-  const SPECIAL = ".+^${}()|[]\\";
-  let out = "";
-  for (let i = 0; i < pattern.length; i++) {
-    const c = pattern[i];
-    if (c === "*") {
-      if (pattern[i + 1] === "*") {
-        if (pattern[i + 2] === "/") {
-          out += "(?:.*/)?"; // `docs/**/x` also matches `docs/x`
-          i += 2;
-        } else {
-          out += ".*";
-          i += 1;
-        }
-      } else out += "[^/]*";
-    } else if (c === "?") out += "[^/]";
-    else if (SPECIAL.includes(c)) out += "\\" + c;
-    else out += c;
+function read(path) {
+  let buf;
+  try {
+    buf = readFileSync(join(ROOT, path));
+  } catch (e) {
+    return { reason: e.code === "ENOENT" ? "not on disk" : "unreadable" };
   }
-  return new RegExp("^" + out + "$");
+  if (buf.length > TEXT_MAX) return { reason: "larger than 512KB" };
+  if (buf.includes(0)) return { reason: "binary" };
+  return { text: buf.toString("utf8") };
 }
 
 /** Resolve the base ref once. Empty string means it is not available here. */
@@ -297,6 +280,7 @@ function buildContext(gates, config) {
     repoFiles: new Set([...tracked, ...excluded.map((e) => e.path)]),
     addedSql: [],
     excluded,
+    unreadable: [],
     changedCount: changedSet ? changedSet.size : null,
     baseAvailable: Boolean(mergeBase),
     baseRef: BASE,
@@ -307,11 +291,16 @@ function buildContext(gates, config) {
       if (changedSet && !changedSet.has(path)) continue;
       const isMd = /\.mdx?$/i.test(path);
       if (!isMd && !SOURCE_EXT.test(path)) continue;
-      const text = read(path);
-      if (text === null) continue;
+      const r = read(path);
+      if (r.reason) {
+        // Not scanned, and therefore worth saying out loud. Silence here means a
+        // file is checked by nothing while the run still reports green.
+        ctx.unreadable.push({ path, reason: r.reason });
+        continue;
+      }
       // Split once here. Gates share the array through lines(), so a repository
       // with three line-based gates splits each file once instead of three times.
-      const file = { path, text, lines: text.split(/\r\n|\r|\n/) };
+      const file = { path, text: r.text, lines: r.text.split(/\r\n|\r|\n/) };
       if (isMd) ctx.markdown.push(file);
       else ctx.source.push(file);
     }
@@ -323,7 +312,11 @@ function buildContext(gates, config) {
       .split("\n")
       .map((s) => s.trim())
       .filter((p) => p && /\.sql$/i.test(p))
-      .map((path) => ({ path, text: read(path) ?? "" }));
+      .map((path) => {
+        const r = read(path);
+        if (r.reason) ctx.unreadable.push({ path, reason: r.reason });
+        return { path, text: r.text ?? "" };
+      });
   }
 
   return ctx;
@@ -420,6 +413,10 @@ else if (JSON_OUT) {
         errorCount,
         grandfathered: grandfathered.length,
         stale,
+        // Machine consumers need to know about a hole in the run just as much as
+        // a human reading the terminal does, and more, since nobody is watching.
+        unreadable: ctx.unreadable,
+        excluded: ctx.excluded.length,
       },
       null,
       2
@@ -506,6 +503,20 @@ function report() {
       process.stdout.write(
         dim(`        ${grandfathered.length} grandfathered by bouncer.baseline.json\n`)
       );
+    }
+    // Printed in yellow rather than dim, because unlike an exclusion this was not
+    // anybody's decision. A tracked source file the reader could not open is a
+    // hole in the run, and a green result does not cover it.
+    if (ctx.unreadable.length) {
+      const byReason = new Map();
+      for (const u of ctx.unreadable) byReason.set(u.reason, (byReason.get(u.reason) ?? 0) + 1);
+      const parts = [...byReason].map(([r, n]) => `${n} ${r}`).join(", ");
+      process.stdout.write(
+        yellow(`        ${ctx.unreadable.length} file${ctx.unreadable.length === 1 ? "" : "s"} could not be read and ${ctx.unreadable.length === 1 ? "was" : "were"} NOT scanned: ${parts}\n`)
+      );
+      for (const u of ctx.unreadable.slice(0, 5)) {
+        process.stdout.write(dim(`          ${u.path} (${u.reason})\n`));
+      }
     }
     process.stdout.write("\n");
   }

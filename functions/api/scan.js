@@ -11,18 +11,8 @@
  *   - doc-links needs the repository file list
  * Neither exists inside a Worker handling one pasted snippet.
  */
-import * as secrets from "../../gates/secrets.mjs";
-import * as scope from "../../gates/scope.mjs";
-import * as money from "../../gates/money.mjs";
-
-const MAX_BYTES = 64 * 1024;
-
-const SCOPE_CONFIG = {
-  models: ["order", "customer", "invoice", "subscription", "payment"],
-  tables: ["orders", "customers", "invoices", "subscriptions", "payments"],
-  column: "tenantId",
-  rawAccessor: "raw",
-};
+import { MAX_SNIPPET_BYTES } from "../../shared/demo-config.mjs";
+import { runDemoGates } from "../../shared/demo-scan.mjs";
 
 export async function onRequestPost({ request }) {
   let body;
@@ -35,36 +25,14 @@ export async function onRequestPost({ request }) {
   const code = typeof body.code === "string" ? body.code : "";
   const filename = typeof body.filename === "string" && body.filename ? body.filename : "snippet.ts";
 
-  if (!code.trim()) return json({ findings: [], unavailable: UNAVAILABLE });
-  if (new TextEncoder().encode(code).length > MAX_BYTES) {
+  if (!code.trim()) return json(runDemoGates(""));
+  if (new TextEncoder().encode(code).length > MAX_SNIPPET_BYTES) {
     return json({ error: "Snippet is too large. 64KB is plenty for a demonstration." }, 413);
   }
 
-  const files = [{ path: filename, text: code }];
-
-  // A gate that throws must not read as a pass. Same rule as the CLI.
-  const findings = [];
-  const crashed = [];
-  for (const [gate, run] of [
-    ["secrets", () => secrets.scan(files)],
-    ["scope", () => scope.scan(files, SCOPE_CONFIG)],
-    ["money", () => money.scan(files)],
-  ]) {
-    try {
-      findings.push(...run());
-    } catch (e) {
-      crashed.push({ gate, message: e.message });
-    }
-  }
-
-  findings.sort((a, b) => a.line - b.line);
-  return json({ findings, crashed, unavailable: UNAVAILABLE });
+  const { findings, crashed, unavailable } = runDemoGates(code, filename);
+  return json({ findings, crashed, unavailable });
 }
-
-const UNAVAILABLE = [
-  { gate: "migration-safety", reason: "needs git history to know which migrations are new" },
-  { gate: "doc-links", reason: "needs the repository file list to check a link resolves" },
-];
 
 export async function onRequestGet() {
   return json({ error: "POST { code, filename } here." }, 405);

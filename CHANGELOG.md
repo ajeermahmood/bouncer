@@ -2,6 +2,60 @@
 
 Notable changes. Dates are the day the work was done.
 
+## 0.2.4 - 2026-09-01
+
+An audit release. Nothing here was reported by a user; all of it came from
+reading the project against its own claims.
+
+### The core library was invisible to the tool
+
+`gates/lib/finding.mjs` used **raw NUL bytes** as fingerprint separators. The
+runtime behaviour was correct, but the file was binary, and the runner skips
+binary files. So Bouncer's own core library was never scanned by any gate, for
+several releases, and nothing in the output hinted at it.
+
+Replaced with the escape sequence for the same character, so fingerprints are
+byte-identical and no existing baseline is invalidated.
+
+### The runner failed open on anything it could not read
+
+The deeper bug behind that one. A tracked source file that was binary, larger
+than 512KB, or unreadable was silently dropped and never scanned, while the run
+still reported green. That is the exact failure this project exists to argue
+against, sitting in the runner.
+
+`read()` now returns a reason instead of null, and the report names the files it
+could not open, in yellow, on every run. `--json` carries them too, because a
+machine consumer needs to know about a hole in the run more than a human does,
+not less.
+
+### Four runtimes, one implementation, now actually true
+
+The gate *rules* were shared. Everything around them was not: the scope config,
+the list of gates to run, the try/catch that stops a throwing gate reading as a
+pass, the sort order and the response shape were copy-pasted into the Cloudflare
+Worker, the Pages Function, the Railway service, the browser playground and the
+benchmark.
+
+So the project's central claim was true of the rules and unverified for the rest,
+and adding one tenant-owned model would have updated one caller while leaving
+four answering differently. Now in `shared/demo-config.mjs` and
+`shared/demo-scan.mjs`, with `tests/demo-parity.test.mjs` asserting that no
+caller imports a gate directly.
+
+### Smaller things
+
+- The playground received the `unavailable` array and dropped it, so the page
+  showed three gates' results while implying five ran.
+- `globToRe` was exported from `bin/bouncer.mjs`, which runs the whole CLI at
+  import time, so it could never be tested. Moved to `gates/lib/glob.mjs` and
+  covered.
+- Removed a dead `redact()` export and an unused `gateByName()`.
+- Fixed "1 files could not be read".
+- 86 tests, up from 64. The new ones pin the classes above: no source file may be
+  binary, no caller may reimplement the scan, and the shared scan must sort
+  deterministically.
+
 ## 0.2.3 - 2026-09-01
 
 - **The published npm README had nineteen broken links.** A README on the registry

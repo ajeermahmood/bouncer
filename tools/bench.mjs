@@ -64,18 +64,13 @@ const secrets = await import(gatesBase + "secrets.mjs");
 const scope = await import(gatesBase + "scope.mjs");
 const money = await import(gatesBase + "money.mjs");
 const docLinks = await import(gatesBase + "doc-links.mjs");
+const { DEMO_SCOPE_CONFIG } = await import(new URL("../shared/demo-config.mjs", import.meta.url).href);
 
 const repoFiles = new Set(tracked);
-const scopeConfig = {
-  models: ["order", "customer", "invoice", "subscription", "payment"],
-  tables: ["orders", "customers", "invoices", "subscriptions", "payments"],
-  column: "tenantId",
-  rawAccessor: "raw",
-};
 
 const cases = [
   ["secrets", () => secrets.scan(source)],
-  ["scope", () => scope.scan(source, scopeConfig)],
+  ["scope", () => scope.scan(source, DEMO_SCOPE_CONFIG)],
   ["money", () => money.scan(source)],
   ["doc-links", () => docLinks.scan(markdown, repoFiles)],
 ];
