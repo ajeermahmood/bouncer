@@ -4,9 +4,24 @@
     "src/components/Playground.tsx"
   ],
   "scope": {
-    "models": ["order", "customer", "invoice", "subscription", "payment"],
-    "tables": ["orders", "customers", "invoices", "subscriptions", "payments"],
+    "models": [
+      "order",
+      "customer",
+      "invoice",
+      "subscription",
+      "payment"
+    ],
+    "tables": [
+      "orders",
+      "customers",
+      "invoices",
+      "subscriptions",
+      "payments"
+    ],
     "column": "tenantId",
     "rawAccessor": "raw"
+  },
+  "doc-links": {
+    "repoUrl": "https://github.com/ajeermahmood/bouncer"
   }
 }

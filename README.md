@@ -41,15 +41,15 @@ be told, by name, on the line, with what to do instead.
 
 | Gate | Catches |
 |---|---|
-| [`secrets`](docs/gates.md#secrets) | Credentials and private keys, plus code that *reads* like an attack even when it is not |
-| [`scope`](docs/gates.md#scope) | Database access that reaches around the tenant-scoped client, so one customer can see another's rows |
-| [`money`](docs/gates.md#money) | Float arithmetic on currency, and the hardcoded `* 100` that breaks JPY and BHD |
-| [`migration-safety`](docs/gates.md#migration-safety) | Schema changes that break the previous version of the app during the deploy window |
-| [`doc-links`](docs/gates.md#doc-links) | Relative links in docs pointing at files that no longer exist |
+| [`secrets`](https://github.com/ajeermahmood/bouncer/blob/main/docs/gates.md#secrets) | Credentials and private keys, plus code that *reads* like an attack even when it is not |
+| [`scope`](https://github.com/ajeermahmood/bouncer/blob/main/docs/gates.md#scope) | Database access that reaches around the tenant-scoped client, so one customer can see another's rows |
+| [`money`](https://github.com/ajeermahmood/bouncer/blob/main/docs/gates.md#money) | Float arithmetic on currency, and the hardcoded `* 100` that breaks JPY and BHD |
+| [`migration-safety`](https://github.com/ajeermahmood/bouncer/blob/main/docs/gates.md#migration-safety) | Schema changes that break the previous version of the app during the deploy window |
+| [`doc-links`](https://github.com/ajeermahmood/bouncer/blob/main/docs/gates.md#doc-links) | Relative links in docs pointing at files that no longer exist |
 
 Each exists because of a specific bug that is quiet, plausible and costly. None
 is a style opinion, because style belongs in a formatter. [Full reference with
-every rule and its rationale](docs/gates.md).
+every rule and its rationale](https://github.com/ajeermahmood/bouncer/blob/main/docs/gates.md).
 
 ## Use it
 
@@ -112,7 +112,7 @@ the same afternoon.
 The fingerprint is content-based, not line-based. A grandfathered finding survives
 moving up and down its file, and starts blocking again the moment somebody edits
 that line, which is exactly when it deserves another look. [Why that
-matters](docs/adoption.md).
+matters](https://github.com/ajeermahmood/bouncer/blob/main/docs/adoption.md).
 
 ## The escape hatch
 
@@ -150,7 +150,7 @@ Three changes did nearly all of it, and none was clever. A union regex tested pe
 line so most lines skip the per-rule loop; the acknowledgement regex cached
 instead of recompiled once per line per gate; and the scope gate's alias matcher
 hoisted out of the inner loop, where it was building a `RegExp` per alias per
-line. That last one is the 11x. [Details](docs/performance.md).
+line. That last one is the 11x. [Details](https://github.com/ajeermahmood/bouncer/blob/main/docs/performance.md).
 
 ## Precision
 
@@ -203,10 +203,10 @@ rule logic, and all four are live so you can check rather than take my word:
 
 | Runtime | Where | Check it |
 |---|---|---|
-| Node CLI | [`bin/bouncer.mjs`](bin/bouncer.mjs) | `npx bouncer-gates --version` |
-| Cloudflare Worker | [`worker/index.js`](worker/index.js) | [POST /api/scan](https://bouncer.ajeermdk001.workers.dev) |
-| Node on Railway | [`server/index.mjs`](server/index.mjs) | [GET /health](https://bouncer-production-9470.up.railway.app/health) |
-| Browser | [`Playground.tsx`](src/components/Playground.tsx) | the playground, offline |
+| Node CLI | [`bin/bouncer.mjs`](https://github.com/ajeermahmood/bouncer/blob/main/bin/bouncer.mjs) | `npx bouncer-gates --version` |
+| Cloudflare Worker | [`worker/index.js`](https://github.com/ajeermahmood/bouncer/blob/main/worker/index.js) | [POST /api/scan](https://bouncer.ajeermdk001.workers.dev) |
+| Node on Railway | [`server/index.mjs`](https://github.com/ajeermahmood/bouncer/blob/main/server/index.mjs) | [GET /health](https://bouncer-production-9470.up.railway.app/health) |
+| Browser | [`Playground.tsx`](https://github.com/ajeermahmood/bouncer/blob/main/src/components/Playground.tsx) | the playground, offline |
 
 A gate needing git history takes the history as an argument.
 
@@ -234,15 +234,15 @@ only direction that actually hurts.
 
 ## Documentation
 
-- [Gate reference](docs/gates.md) - every rule, what it catches, what it misses
-- [Architecture](docs/architecture.md) - why gates are pure, how the runner works
-- [Adoption](docs/adoption.md) - rolling this out on an existing codebase
-- [Performance](docs/performance.md) - what was slow and how it was measured
-- [Deployment](docs/deployment.md) - Cloudflare, Railway and npm, and how each fails quietly
-- [AGENTS.md](AGENTS.md) - the contract for humans and coding agents
-- [CONTRIBUTING.md](CONTRIBUTING.md) - adding a gate
+- [Gate reference](https://github.com/ajeermahmood/bouncer/blob/main/docs/gates.md) - every rule, what it catches, what it misses
+- [Architecture](https://github.com/ajeermahmood/bouncer/blob/main/docs/architecture.md) - why gates are pure, how the runner works
+- [Adoption](https://github.com/ajeermahmood/bouncer/blob/main/docs/adoption.md) - rolling this out on an existing codebase
+- [Performance](https://github.com/ajeermahmood/bouncer/blob/main/docs/performance.md) - what was slow and how it was measured
+- [Deployment](https://github.com/ajeermahmood/bouncer/blob/main/docs/deployment.md) - Cloudflare, Railway and npm, and how each fails quietly
+- [AGENTS.md](https://github.com/ajeermahmood/bouncer/blob/main/AGENTS.md) - the contract for humans and coding agents
+- [CONTRIBUTING.md](https://github.com/ajeermahmood/bouncer/blob/main/CONTRIBUTING.md) - adding a gate
 
-There are two Claude Code skills in [`.claude/skills/`](.claude/skills):
+There are two Claude Code skills in [`.claude/skills/`](https://github.com/ajeermahmood/bouncer/blob/main/.claude/skills):
 `gate-review` covers what the mechanical gates structurally cannot see, and
 `new-gate` walks through adding one, including the part where it tells you the
 rule you asked for should not be a gate at all.

@@ -69,7 +69,7 @@ export const GATES = [
   {
     ...docLinks,
     needs: ["markdown", "repoFiles"],
-    run: (ctx) => docLinks.scan(ctx.markdown, ctx.repoFiles),
+    run: (ctx, cfg) => docLinks.scan(ctx.markdown, ctx.repoFiles, cfg["doc-links"]),
   },
 ];
 

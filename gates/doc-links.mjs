@@ -25,7 +25,8 @@ import { finding, lineAt, ERROR } from "./lib/finding.mjs";
  */
 export const name = "doc-links";
 export const title = "Documentation links";
-export const summary = "Relative links in markdown that point at files which no longer exist.";
+export const summary =
+  "Links in markdown that point at files which no longer exist, relative or back into this repository.";
 
 // [text](target), but not ![image](target).
 //
@@ -67,10 +68,13 @@ function directoriesOf(known) {
 /**
  * @param {{path: string, text: string}[]} files  markdown files
  * @param {Set<string>|string[]} repoFiles  every path in the repo, forward-slashed
+ * @param {{repoUrl?: string}} [config]  set repoUrl to also check absolute links
+ *   that point back into this repository
  */
-export function scan(files, repoFiles) {
+export function scan(files, repoFiles, config = {}) {
   const known = repoFiles instanceof Set ? repoFiles : new Set(repoFiles);
   const dirs = directoriesOf(known);
+  const selfLink = config.repoUrl ? selfLinkMatcher(config.repoUrl) : null;
   const out = [];
 
   for (const file of files) {
@@ -83,7 +87,25 @@ export function scan(files, repoFiles) {
     const baseDir = slash === -1 ? "" : from.slice(0, slash);
 
     for (const m of file.text.matchAll(LINK)) {
-      const raw = m[1];
+      let raw = m[1];
+
+      // An absolute link back into this same repository is still a link to a file
+      // we can check, so unwrap it and treat it as a repo path.
+      //
+      // This exists because of npm. A README published to the registry keeps its
+      // relative links verbatim, and they resolve against npmjs.com, where they
+      // all 404. This repository's own package page had nineteen broken links for
+      // exactly that reason, which is a funny way to learn it when the tool
+      // shipping them has a gate for documentation that lies.
+      //
+      // Rewriting them as absolute GitHub URLs fixes npm and would normally cost
+      // the coverage, since absolute links are skipped as external. Recognising
+      // our own repository is what keeps both.
+      if (selfLink) {
+        const unwrapped = raw.match(selfLink);
+        if (unwrapped) raw = unwrapped[1];
+      }
+
       if (isExternal(raw)) continue;
 
       // Strip the anchor. Whether the heading exists is a different gate, and a
@@ -124,6 +146,19 @@ export function scan(files, repoFiles) {
     }
   }
   return out;
+}
+
+/**
+ * Matches this repository's own blob and tree URLs, capturing the path inside.
+ *
+ * Accepts any ref, so a link pinned to a tag or a commit still resolves against
+ * the working tree. That is a deliberate approximation: checking a path as it
+ * existed at some other commit would need history the gate does not have, and
+ * reporting nothing at all would be worse than checking against today.
+ */
+function selfLinkMatcher(repoUrl) {
+  const base = repoUrl.replace(/\/+$/, "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp("^" + base + "/(?:blob|tree)/[^/]+/(.+)$");
 }
 
 function isExternal(href) {

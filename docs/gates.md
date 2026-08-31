@@ -281,6 +281,26 @@ Docs that lie are a correctness problem now, not a tidiness one.
   sibling package legitimately does
 - Percent-escaped paths are decoded before checking
 
+### Absolute links back into this repository
+
+Set `repoUrl` and links to your own repo are unwrapped and checked as paths:
+
+```json
+{ "doc-links": { "repoUrl": "https://github.com/you/yourrepo" } }
+```
+
+This exists because of npm. A README published to the registry keeps its relative
+links verbatim, and they resolve against npmjs.com rather than your repository, so
+they all 404. This project shipped nineteen broken links onto its own package page
+that way, which is an instructive thing to discover about a tool whose job includes
+catching documentation that lies.
+
+Rewriting them as absolute GitHub URLs fixes npm, and would normally cost the
+coverage, because absolute links are skipped as external. Recognising your own
+repository keeps both. Any ref is accepted, so a link pinned to a tag still
+resolves, checked against the working tree rather than against history the gate
+does not have.
+
 ### A cautionary note about how this is scoped
 
 The first version listed files with `git ls-files "*.md" "**/*.md"`. On Linux the

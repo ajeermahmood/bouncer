@@ -2,6 +2,25 @@
 
 Notable changes. Dates are the day the work was done.
 
+## 0.2.3 - 2026-09-01
+
+- **The published npm README had nineteen broken links.** A README on the registry
+  keeps its relative links verbatim, and they resolve against npmjs.com rather than
+  the repository, so every `docs/gates.md` reference 404d on the package page. An
+  instructive thing to discover about a tool whose job includes catching
+  documentation that lies. The README now uses absolute URLs.
+- **`doc-links` learned to check absolute links back into the same repository**, so
+  making the README absolute did not cost the coverage. Set
+  `{"doc-links": {"repoUrl": "..."}}` and links to your own repo are unwrapped and
+  checked as paths. Without it they would be skipped as external, which is how a
+  fix for one problem quietly creates another.
+- The Railway service now returns the `unavailable` array the Worker already did,
+  naming the two gates that cannot answer for a single pasted snippet. Returning
+  findings from three gates and letting the caller assume five ran is the exact
+  failure this project argues against, and the hosted API was doing it.
+- All four runtimes are live and linked from the README, so the claim about one
+  implementation running in four places is checkable rather than asserted.
+
 ## 0.2.2 - 2026-08-31
 
 - **The install command was wrong.** Every doc said `npx bouncer`. That name
