@@ -232,6 +232,7 @@ only direction that actually hurts.
 - [Architecture](docs/architecture.md) - why gates are pure, how the runner works
 - [Adoption](docs/adoption.md) - rolling this out on an existing codebase
 - [Performance](docs/performance.md) - what was slow and how it was measured
+- [Deployment](docs/deployment.md) - Cloudflare, Railway and npm, and how each fails quietly
 - [AGENTS.md](AGENTS.md) - the contract for humans and coding agents
 - [CONTRIBUTING.md](CONTRIBUTING.md) - adding a gate
 
