@@ -6,7 +6,14 @@ Live demo: [bouncer.pages.dev](https://bouncer.pages.dev) - paste code into the
 playground and the real gate modules run on it.
 
 ```bash
-npx bouncer
+npx bouncer-gates
+```
+
+The npm package is `bouncer-gates`; the command it installs is `bouncer`. To run it
+straight from source without installing anything:
+
+```bash
+npx github:ajeermahmood/bouncer
 ```
 
 ---
@@ -47,12 +54,12 @@ every rule and its rationale](docs/gates.md).
 ## Use it
 
 ```bash
-npx bouncer                        # every gate, whole repository
-npx bouncer --changed              # only what this branch touched
-npx bouncer --only scope,money     # some of them
-npx bouncer --explain scope        # what a gate checks, and how to excuse a case
-npx bouncer --json                 # machine output
-npx bouncer --sarif                # GitHub code scanning
+npx bouncer-gates                        # every gate, whole repository
+npx bouncer-gates --changed              # only what this branch touched
+npx bouncer-gates --only scope,money     # some of them
+npx bouncer-gates --explain scope        # what a gate checks, and how to excuse a case
+npx bouncer-gates --json                 # machine output
+npx bouncer-gates --sarif                # GitHub code scanning
 ```
 
 Exit code `0` clean, `1` blocking findings, `2` the runner could not do its job.
@@ -80,7 +87,7 @@ In GitHub Actions:
 - uses: actions/checkout@v4
   with:
     fetch-depth: 0     # without this the migration gate cannot see what is new
-- run: npx bouncer --base origin/${{ github.base_ref }}
+- run: npx bouncer-gates --base origin/${{ github.base_ref }}
 ```
 
 That `fetch-depth: 0` is the difference between a real check and one that reports
@@ -95,7 +102,7 @@ without an answer here the realistic options are to not add the gate, or to add
 it as a warning everyone learns to scroll past.
 
 ```bash
-npx bouncer --baseline-write
+npx bouncer-gates --baseline-write
 ```
 
 That records what is already wrong. Those findings stop blocking; anything **new**

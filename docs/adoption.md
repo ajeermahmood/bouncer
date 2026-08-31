@@ -18,7 +18,7 @@ so the realistic options are:
 ## The baseline
 
 ```bash
-npx bouncer --baseline-write
+npx bouncer-gates --baseline-write
 git add bouncer.baseline.json && git commit -m "Baseline existing findings"
 ```
 
@@ -109,7 +109,7 @@ work in itself.
 ## Speed on a large repository
 
 ```yaml
-- run: npx bouncer --changed --base origin/${{ github.base_ref }}
+- run: npx bouncer-gates --changed --base origin/${{ github.base_ref }}
 ```
 
 `--changed` scans only what the branch touched. On a 1,200 file repository the

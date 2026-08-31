@@ -163,7 +163,7 @@ const description =
         not adding the gate, or adding it as a warning everyone learns to scroll
         past. Both mean the rule is not enforced.
       </p>
-      <pre class="scroll-x"><code>npx bouncer --baseline-write</code></pre>
+      <pre class="scroll-x"><code>npx bouncer-gates --baseline-write</code></pre>
       <p>
         That records what is already wrong. Those stop blocking; anything new blocks
         immediately. The debt stays visible and countable, and the bleeding stops the
@@ -245,12 +245,12 @@ const description =
     <div class="wrap narrow">
       <p class="eyebrow">Use it</p>
       <h2>Two files and a workflow step.</h2>
-      <pre class="scroll-x"><code>npx bouncer                        # every gate, whole repository
-npx bouncer --changed              # only what this branch touched
-npx bouncer --only scope,money     # some of them
-npx bouncer --explain scope        # what a gate checks, and how to excuse a case
-npx bouncer --baseline-write       # grandfather what is already wrong
-npx bouncer --sarif                # GitHub code scanning</code></pre>
+      <pre class="scroll-x"><code>npx bouncer-gates                        # every gate, whole repository
+npx bouncer-gates --changed              # only what this branch touched
+npx bouncer-gates --only scope,money     # some of them
+npx bouncer-gates --explain scope        # what a gate checks, and how to excuse a case
+npx bouncer-gates --baseline-write       # grandfather what is already wrong
+npx bouncer-gates --sarif                # GitHub code scanning</code></pre>
       <p>
         Configure the tenant-scoped models in <code>bouncer.config.json</code>, add one
         step to your workflow, and set <code>fetch-depth: 0</code> so the migration gate
