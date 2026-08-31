@@ -1,6 +1,6 @@
 {
   "name": "bouncer-gates",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "CI gates that let anyone contribute to a codebase without being able to break it.",
   "type": "module",
   "license": "MIT",
@@ -18,10 +18,14 @@
   "files": [
     "bin",
     "gates",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "check": "node bin/bouncer.mjs",
+    "check:changed": "node bin/bouncer.mjs --changed",
+    "baseline": "node bin/bouncer.mjs --baseline-write",
+    "bench": "node tools/bench.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "dev": "astro dev",
@@ -38,5 +42,20 @@
     "react-dom": "^19.2.3",
     "sass": "^1.86.3",
     "vitest": "^3.2.4"
+  },
+  "keywords": [
+    "ci",
+    "lint",
+    "guardrails",
+    "multi-tenant",
+    "security",
+    "secrets",
+    "migrations",
+    "code-review",
+    "devtools"
+  ],
+  "homepage": "https://bouncer.pages.dev",
+  "bugs": {
+    "url": "https://github.com/ajeermahmood/bouncer/issues"
   }
 }

@@ -1,0 +1,31 @@
+name: New gate proposal
+description: Suggest a new check
+labels: ["new gate"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Most proposed gates should not be gates. Formatting belongs in a formatter,
+        type safety in the compiler, and taste in `AGENTS.md`. A gate is for rules
+        where being wrong is expensive AND the bad pattern is mechanical.
+  - type: textarea
+    id: cost
+    attributes:
+      label: What did this cost, or what would it have cost?
+      description: A real incident, or a plausible expensive one. If there isn't one, this is a preference.
+    validations:
+      required: true
+  - type: textarea
+    id: pattern
+    attributes:
+      label: Describe the bad pattern without using the word "usually"
+      description: If you can't, the rule will produce false positives, get switched off, and protect nothing.
+    validations:
+      required: true
+  - type: textarea
+    id: nearmiss
+    attributes:
+      label: What legitimate code looks most like it?
+      description: The near-miss is what decides whether this is implementable.
+    validations:
+      required: true

@@ -1,0 +1,36 @@
+name: False positive
+description: A gate flagged something that is fine
+labels: ["false positive"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This is the most useful issue you can open here. Precision is what decides
+        whether a tool like this survives contact with a real team, and every
+        false positive spends somebody's attention.
+  - type: input
+    id: rule
+    attributes:
+      label: Rule id
+      placeholder: money/float-to-minor
+    validations:
+      required: true
+  - type: textarea
+    id: snippet
+    attributes:
+      label: The smallest snippet that reproduces it
+      render: javascript
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: What the code actually does
+      description: Why this is correct as written. This is the part that tells us how to narrow the rule.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      placeholder: "npx bouncer --version"

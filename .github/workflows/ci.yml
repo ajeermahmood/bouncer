@@ -5,11 +5,16 @@ on:
     branches: [main]
   pull_request:
 
-# The PR comment step needs write access. Everything else is read-only, and the
-# token is scoped down here rather than left at the repository default.
+# The PR comment and the SARIF upload need write access. Everything else is
+# read-only, and the token is scoped here rather than left at the repo default.
 permissions:
   contents: read
   pull-requests: write
+  security-events: write
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   gates:
@@ -19,9 +24,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           # Without full history there is no merge-base, so the migration gate
-          # cannot tell which .sql files are new. It reports SKIPPED rather than
-          # PASSED in that case, which is honest but useless. This one line is
-          # what makes that gate real.
+          # cannot tell which .sql files are new. It reports SKIPPED with that
+          # reason rather than PASSED, which is honest but useless. This one line
+          # is what makes that gate real.
           fetch-depth: 0
 
       - uses: actions/setup-node@v4
@@ -35,14 +40,23 @@ jobs:
       # and a contributor should not wait through a build to be told about a
       # hardcoded password on line 3.
       - name: Bouncer
-        id: bouncer
         run: node bin/bouncer.mjs --base origin/${{ github.base_ref || 'main' }}
 
-      # Runs even when the gates failed, so the PR comment can explain what
-      # happened instead of leaving a red X and a link to a log.
+      # Runs even when the gates failed, so the PR comment and the Security tab
+      # can explain what happened instead of leaving a red X and a link to a log.
       - name: Collect findings
-        if: always() && github.event_name == 'pull_request'
-        run: node bin/bouncer.mjs --json --base origin/${{ github.base_ref }} > findings.json || true
+        if: always()
+        run: |
+          node bin/bouncer.mjs --json  --base origin/${{ github.base_ref || 'main' }} > findings.json || true
+          node bin/bouncer.mjs --sarif --base origin/${{ github.base_ref || 'main' }} > bouncer.sarif || true
+
+      - name: Upload to code scanning
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: bouncer.sarif
+          category: bouncer
+        continue-on-error: true
 
       - name: Explain on the PR
         if: always() && github.event_name == 'pull_request'
@@ -57,9 +71,14 @@ jobs:
             const findings = data.results.flatMap(r => r.findings);
             const errors = findings.filter(f => f.severity === 'error');
 
+            // A gate that could not run is worth saying out loud. A green check
+            // that skipped everything is the failure mode this whole project is
+            // built to avoid, so it should not be silent on the PR either.
+            const skipped = data.results.filter(r => r.status === 'skipped');
+
             // Nothing to say. Do not post "all good" on every push; a bot that
-            // comments on everything gets muted, and then it cannot tell you
-            // the one thing that mattered.
+            // comments on everything gets muted, and then it cannot tell you the
+            // one thing that mattered.
             if (!errors.length) return;
 
             const body = [
@@ -76,6 +95,10 @@ jobs:
                 f.fix ? `**What to do:** ${f.fix}` : '',
               ].join('\n')),
               '',
+              skipped.length
+                ? '<details><summary>' + skipped.length + ' gate(s) did not run</summary>\n\n' +
+                  skipped.map(s => `- \`${s.gate}\`: ${s.reason}`).join('\n') + '\n</details>\n'
+                : '',
               '---',
               'If one of these is wrong for a good reason, write the reason in the code:',
               '```',
@@ -100,16 +123,25 @@ jobs:
             }
 
   test:
-    name: Tests
-    runs-on: ubuntu-latest
+    name: Tests (${{ matrix.os }}, node ${{ matrix.node }})
+    strategy:
+      fail-fast: false
+      matrix:
+        # Windows is in the matrix on purpose. Path separators are the single
+        # richest source of bugs in this codebase: an early doc-links gate passed
+        # on Windows while silently checking almost nothing on Linux.
+        os: [ubuntu-latest, windows-latest]
+        node: [20, 22]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: ${{ matrix.node }}
           cache: npm
       - run: npm ci
       - run: npm test
+      - run: node bin/bouncer.mjs --no-baseline
 
   build:
     name: Build site

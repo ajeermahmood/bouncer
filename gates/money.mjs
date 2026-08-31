@@ -1,4 +1,4 @@
-import { finding, lines, acknowledged, ERROR } from "./lib/finding.mjs";
+import { finding, lines, acknowledged, isCommentLine, isTestFile, ERROR, WARN } from "./lib/finding.mjs";
 
 /**
  * Two bugs hiding in one innocent-looking expression.
@@ -21,11 +21,6 @@ import { finding, lines, acknowledged, ERROR } from "./lib/finding.mjs";
  * The fix is not "round more carefully". It is to stop letting float touch money
  * at all: parse the decimal string to an integer directly, and get the exponent
  * from the currency.
- *
- * This gate is narrow on purpose. It flags the specific shape "float arithmetic
- * on something named like money" and the specific constant 100 next to a currency
- * amount. It will not catch money bugs expressed some other way. It catches the
- * one that is in nearly every codebase.
  */
 export const name = "money";
 export const title = "Money arithmetic";
@@ -33,7 +28,47 @@ export const summary =
   "Float maths on currency, and the hardcoded x100 that breaks every zero- and three-decimal currency.";
 
 const MONEYISH =
-  "(?:amount|price|total|subtotal|cost|fee|balance|paise|cents|minor|gross|net|charge|refund|discount|tax|shipping)";
+  "(?:amount|price|total|subtotal|cost|fee|balance|paise|cents|minor|gross|net|charge|refund|discount|tax|shipping|payable|payout)";
+
+/**
+ * The percentage problem, which is what this gate got wrong first.
+ *
+ * `Math.round(x * 100)` is the canonical money bug AND the canonical way to
+ * render a percentage. Run against a real 1,209 file repository, every single
+ * false positive this gate produced was a percentage:
+ *
+ *     `${Math.round((num / den) * 100)}%`
+ *     `showing at ${Math.round(scale * 100)}%`
+ *
+ * Both carry a decisive signal: a literal `%` immediately after the closing
+ * brace or bracket. Percent-shaped identifiers are checked too, because a
+ * value can be computed on one line and formatted on another.
+ *
+ * This narrowing loses a real bug only in the case of money multiplied by 100 on
+ * a line that also renders a percentage, which is not a thing anybody writes.
+ */
+const PERCENT_RENDER = /[)}\]]\s*%|%\s*["'`)]|\btoFixed\(\d\)\s*\+\s*["'`]%/;
+const PERCENT_IDENT =
+  /\b(?:pct|percent|percentage|ratio|scale|zoom|opacity|progress|completion|rate|share|weight|score|confidence|aspect|bin|trim)\w*\b/i;
+
+/**
+ * A division inside the rounded expression is the percentage signature.
+ *
+ * Every false positive this gate produced on a real 1,209 file repository was
+ * one of these, and the two the naming heuristic still missed both had it:
+ *
+ *     Math.round((1 - canvasAspect / targetAspect) * 100)
+ *     bins.map(count => Math.round((count / maxBin) * 100))
+ *
+ * A percentage is a part divided by a whole and then scaled. A currency
+ * conversion to minor units is a single value scaled, with nothing divided first,
+ * because dividing money before multiplying it by 100 is not a thing anybody
+ * writes on purpose.
+ *
+ * A money-shaped identifier on the line overrides this, so a genuine
+ * `Math.round((amount / quantity) * 100)` unit price is still reported.
+ */
+const DIVIDES_FIRST = /Math\.round\s*\([^)]*\/[^)]*(?:\)[^)]*)?\*\s*(?:100|1000)\b/i;
 
 const RULES = [
   {
@@ -42,6 +77,7 @@ const RULES = [
       "Math\\.round\\s*\\(\\s*(?:parseFloat|Number|parseInt)?\\s*\\(?[^)]*\\)?\\s*\\*\\s*(?:100|1000)\\b",
       "i"
     ),
+    notPercent: true,
     message:
       "This converts a decimal amount to minor units through a float, which rounds the wrong way on values like 10.005.",
     fix: "Parse the decimal string to an integer without going through a float, and take the exponent from the currency rather than assuming 2.",
@@ -56,7 +92,8 @@ const RULES = [
   {
     rule: "money/float-parse",
     re: new RegExp("(?:parseFloat|Number)\\s*\\(\\s*\\w*" + MONEYISH + "\\w*\\s*\\)", "i"),
-    message: "A currency value is parsed into a float. Every later operation on it inherits binary rounding error.",
+    message:
+      "A currency value is parsed into a float. Every later operation on it inherits binary rounding error.",
     fix: "Keep money as an integer in minor units, or as a decimal string, all the way through.",
   },
   {
@@ -65,39 +102,83 @@ const RULES = [
     message:
       "A currency value is accumulated in place. If it is a float, the error compounds once per line item.",
     fix: "Sum integer minor units. If this is already an integer total, acknowledge it.",
+    // Noisy alone. Only reported once the file has already shown float money
+    // handling, so it adds context to a real problem instead of standing on its own.
     softOnly: true,
   },
 ];
 
+/**
+ * Money words that cannot plausibly mean anything else.
+ *
+ * Deliberately a shorter list than MONEYISH. "total", "net", "gross", "balance",
+ * "rate" and "share" all appear constantly in code that has nothing to do with
+ * currency, so they are fine for spotting a candidate line and useless for
+ * overruling a percentage.
+ */
+const STRONG_MONEY =
+  /\b(?:amount|price|paise|cents|minor|subtotal|payable|payout|charge|refund|invoice|currency)\w*\b/i;
+
+const UNION = new RegExp(RULES.map((r) => "(?:" + r.re.source + ")").join("|"), "i");
+const SOURCE = /\.(?:ts|tsx|js|jsx|mjs|cjs)$/;
+const SKIP_PATH = /(?:^|\/)(?:node_modules|dist|build|coverage)\//;
+
 export function scan(files) {
   const out = [];
-  for (const file of files) {
-    if (!/\.(?:ts|tsx|js|jsx|mjs|cjs)$/.test(file.path)) continue;
-    const norm = file.path.replace(/\\/g, "/");
-    if (/(?:^|\/)(?:node_modules|dist|build)\//.test(norm)) continue;
-    if (norm.includes("gates/money.mjs")) continue;
 
-    const all = lines(file.text);
+  for (const file of files) {
+    const norm = file.path.replace(/\\/g, "/");
+    if (!SOURCE.test(norm) || SKIP_PATH.test(norm)) continue;
+    if (norm.endsWith("gates/money.mjs")) continue;
+    if (!UNION.test(file.text)) continue;
+
+    const inTest = isTestFile(norm);
+    const all = lines(file);
+    // Was `out.some(f => f.path === file.path)` on every line, which made the
+    // gate quadratic in findings-per-file. A flag is the same logic in O(1).
+    let fileHasHardFinding = false;
+
     for (let i = 0; i < all.length; i++) {
       const line = all[i];
-      if (/^\s*(?:\/\/|\*|\/\*)/.test(line)) continue; // a comment explaining the bug is not the bug
+      if (isCommentLine(line)) continue; // a comment about the bug is not the bug
+      if (!UNION.test(line)) continue;
       if (acknowledged(all, i, "money")) continue;
 
       for (const r of RULES) {
-        // The accumulate rule is noisy on its own; only report it when the file
-        // already shows float money handling, so it adds context instead of spam.
-        if (r.softOnly && !out.some((f) => f.path === file.path)) continue;
+        if (r.softOnly && !fileHasHardFinding) continue;
         if (!r.re.test(line)) continue;
+
+        if (r.notPercent) {
+          // An explicit percent signal is decisive and cannot be overridden.
+          //
+          // The override used to accept ANY money-shaped word, which let this
+          // through on a real repository:
+          //
+          //     const pct = total ? Math.round((done / total) * 100) : 0;
+          //
+          // a progress pill, reported as a currency bug because "total" is in the
+          // money vocabulary. "total", "net", "gross" and "balance" are all
+          // perfectly ordinary counting words. Only unambiguous money words get
+          // to overrule the weaker division heuristic, and nothing overrules a
+          // literal percent sign or a variable actually named for a percentage.
+          if (PERCENT_RENDER.test(line) || PERCENT_IDENT.test(line)) continue;
+          if (DIVIDES_FIRST.test(line) && !STRONG_MONEY.test(line)) continue;
+        }
+
         out.push(
           finding({
             path: file.path,
             line: i + 1,
             rule: r.rule,
-            message: r.message,
+            // A money bug inside a test is arithmetic in an assertion, not a
+            // charge to a customer. Same reasoning as the secrets gate: report
+            // it, do not block on it.
+            message: inTest ? r.message + " This is a test file, so it is reported as a warning." : r.message,
             fix: r.fix,
-            severity: ERROR,
+            severity: inTest ? WARN : ERROR,
           })
         );
+        if (!r.softOnly) fileHasHardFinding = true;
         break; // one finding per line; the first rule is the most specific
       }
     }

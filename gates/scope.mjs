@@ -1,4 +1,4 @@
-import { finding, lines, acknowledged, ERROR } from "./lib/finding.mjs";
+import { finding, lines, acknowledged, isCommentLine, escapeRe, ERROR } from "./lib/finding.mjs";
 
 /**
  * "Every row belongs to somebody, and you must say who."
@@ -38,15 +38,6 @@ export const title = "Tenant scope";
 export const summary =
   "Database access that reaches around the tenant-scoped client, via the raw client, an alias, or raw SQL.";
 
-/**
- * @typedef {object} ScopeConfig
- * @property {string[]} models      tenant-owned model names, e.g. ["order","customer"]
- * @property {string[]} tables      tenant-owned SQL table names, for the raw-SQL check
- * @property {string}   column      the scope column, e.g. "tenantId"
- * @property {string}   rawAccessor  the unsafe accessor, e.g. "raw" in `db.raw.order`
- * @property {string[]} rawSqlCalls  method names that take SQL, e.g. ["$queryRaw"]
- */
-
 /** Sensible defaults for a Prisma codebase. Override in bouncer.config.json. */
 export const DEFAULTS = {
   models: [],
@@ -56,45 +47,90 @@ export const DEFAULTS = {
   rawSqlCalls: ["$queryRaw", "$queryRawUnsafe", "$executeRaw", "$executeRawUnsafe"],
 };
 
-export function scan(files, config = {}) {
+const SOURCE = /\.(?:ts|tsx|js|jsx|mjs|cjs)$/;
+const SKIP_PATH = /(?:^|\/)(?:node_modules|dist|build|coverage)\//;
+
+/**
+ * Compiled form of one config, cached.
+ *
+ * The CLI calls scan() once, so this looks like nothing. The Railway service
+ * calls it per request, and the playground calls it on every keystroke, where
+ * recompiling nine regexes each time is pure waste. Keyed on the config's own
+ * values rather than object identity, so a caller that rebuilds an equivalent
+ * config object still hits the cache.
+ */
+const COMPILED = new Map();
+
+function compile(config) {
   const cfg = { ...DEFAULTS, ...config };
-  const out = [];
-  if (!cfg.models.length && !cfg.tables.length) return out;
+  const key = JSON.stringify([
+    cfg.models,
+    cfg.tables,
+    cfg.column,
+    cfg.rawAccessor,
+    cfg.rawSqlCalls,
+  ]);
+  const hit = COMPILED.get(key);
+  if (hit) return hit;
 
   const modelAlt = cfg.models.map(escapeRe).join("|");
   const tableAlt = cfg.tables.map(escapeRe).join("|");
 
-  // db.raw.order  /  this.prisma.raw.order
-  const viaRaw = modelAlt
-    ? new RegExp("\\." + escapeRe(cfg.rawAccessor) + "\\.(" + modelAlt + ")\\b")
-    : null;
+  const built = {
+    active: Boolean(cfg.models.length || cfg.tables.length),
+    column: cfg.column,
+    // db.raw.order / this.prisma.raw.order
+    viaRaw: modelAlt
+      ? new RegExp("\\." + escapeRe(cfg.rawAccessor) + "\\.(" + modelAlt + ")\\b")
+      : null,
+    // const c = db.raw  -> uses of `c` after this are suspect
+    aliasDecl: new RegExp(
+      "(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)\\s*=\\s*[\\w.$]*\\." +
+        escapeRe(cfg.rawAccessor) +
+        "\\s*;?\\s*$"
+    ),
+    modelAlt,
+    rawSql: new RegExp("\\.(?:" + cfg.rawSqlCalls.map(escapeRe).join("|") + ")\\b"),
+    touchesTable: tableAlt
+      ? new RegExp("\\b(?:FROM|JOIN|UPDATE|INTO|TABLE)\\s+\"?(" + tableAlt + ")\"?\\b", "i")
+      : null,
+    hasScopeColumn: new RegExp("\\b" + escapeRe(cfg.column) + "\\b", "i"),
+    // Whole-file reject: if none of these substrings appear, no line can match.
+    trigger: new RegExp(
+      "\\." + escapeRe(cfg.rawAccessor) + "\\b|" + cfg.rawSqlCalls.map(escapeRe).join("|")
+    ),
+  };
 
-  // const c = db.raw   -> everything after this in the file is suspect
-  const aliasDecl = new RegExp(
-    "(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)\\s*=\\s*[\\w.$]*\\." +
-      escapeRe(cfg.rawAccessor) + "\\s*;?\\s*$"
-  );
+  COMPILED.set(key, built);
+  return built;
+}
 
-  const rawSql = new RegExp(
-    "\\.(?:" + cfg.rawSqlCalls.map(escapeRe).join("|") + ")\\b"
-  );
-  const touchesTable = tableAlt
-    ? new RegExp("\\b(?:FROM|JOIN|UPDATE|INTO|TABLE)\\s+\"?(" + tableAlt + ")\"?\\b", "i")
-    : null;
-  const hasScopeColumn = new RegExp("\\b" + escapeRe(cfg.column) + "\\b", "i");
+export function scan(files, config = {}) {
+  const c = compile(config);
+  const out = [];
+  if (!c.active) return out;
 
   for (const file of files) {
-    if (!/\.(?:ts|tsx|js|jsx|mjs|cjs)$/.test(file.path)) continue;
-    if (/(?:^|\/)(?:node_modules|dist|build)\//.test(file.path.replace(/\\/g, "/"))) continue;
+    const norm = file.path.replace(/\\/g, "/");
+    if (!SOURCE.test(norm) || SKIP_PATH.test(norm)) continue;
+    if (!c.trigger.test(file.text)) continue;
 
-    const all = lines(file.text);
-    const aliases = new Set();
+    const all = lines(file);
+    // Alias name -> compiled matcher. Built once per alias per file, rather than
+    // once per alias per LINE, which is what the first version did and was by far
+    // the hottest allocation in the program.
+    const aliasRes = new Map();
 
     for (let i = 0; i < all.length; i++) {
       const line = all[i];
 
-      const alias = line.match(aliasDecl);
-      if (alias) aliases.add(alias[1]);
+      const decl = line.match(c.aliasDecl);
+      if (decl && c.modelAlt && !aliasRes.has(decl[1])) {
+        aliasRes.set(
+          decl[1],
+          new RegExp("\\b" + escapeRe(decl[1]) + "\\.(" + c.modelAlt + ")\\b")
+        );
+      }
 
       if (acknowledged(all, i, "scope")) continue;
 
@@ -105,8 +141,8 @@ export function scan(files, config = {}) {
       // code still gets checked.
       if (isCommentLine(line)) continue;
 
-      if (viaRaw) {
-        const m = line.match(viaRaw);
+      if (c.viaRaw) {
+        const m = line.match(c.viaRaw);
         if (m) {
           out.push(
             finding({
@@ -114,11 +150,12 @@ export function scan(files, config = {}) {
               line: i + 1,
               rule: "scope/raw-client",
               message:
-                `"${m[1]}" is tenant-owned, but this reads it through the unscoped client, ` +
-                `so it can see every tenant's rows.`,
+                '"' +
+                m[1] +
+                '" is tenant-owned, but this reads it through the unscoped client, so it can see every tenant\'s rows.',
               fix:
-                `Go through the scoped client instead. If this genuinely must span tenants ` +
-                `(an admin report, a cron job), say so: // bouncer-ok(scope): <why>`,
+                "Go through the scoped client instead. If this genuinely must span tenants " +
+                "(an admin report, a cron job), say so: // bouncer-ok(scope): <why>",
               severity: ERROR,
             })
           );
@@ -126,22 +163,20 @@ export function scan(files, config = {}) {
         }
       }
 
-      for (const a of aliases) {
-        const aliasUse = modelAlt
-          ? new RegExp("\\b" + escapeRe(a) + "\\.(" + modelAlt + ")\\b")
-          : null;
-        const m = aliasUse && line.match(aliasUse);
-        if (m) {
+      if (aliasRes.size) {
+        for (const [alias, re] of aliasRes) {
+          const m = line.match(re);
+          if (!m) continue;
           out.push(
             finding({
               path: file.path,
               line: i + 1,
               rule: "scope/raw-alias",
               message:
-                `"${m[1]}" is reached through "${a}", which is an alias for the unscoped client.`,
+                '"' + m[1] + '" is reached through "' + alias + '", an alias for the unscoped client.',
               fix:
-                `Aliasing the raw client hides the bypass from a reader. Use the scoped ` +
-                `client, or acknowledge with // bouncer-ok(scope): <why>`,
+                "Aliasing the raw client hides the bypass from a reader. Use the scoped " +
+                "client, or acknowledge with // bouncer-ok(scope): <why>",
               severity: ERROR,
             })
           );
@@ -161,21 +196,26 @@ export function scan(files, config = {}) {
       // its `tenantId`, and concludes the FIRST query was scoped. A cross-tenant
       // leak is cleared because the line below it happened to be correct.
       // So the window ends where the statement ends.
-      if (rawSql.test(line) && touchesTable) {
-        const window = statementAt(all, i);
-        const t = window.match(touchesTable);
-        if (t && !hasScopeColumn.test(window)) {
+      if (c.touchesTable && c.rawSql.test(line)) {
+        const stmt = statementAt(all, i);
+        const t = stmt.match(c.touchesTable);
+        if (t && !c.hasScopeColumn.test(stmt)) {
           out.push(
             finding({
               path: file.path,
               line: i + 1,
               rule: "scope/raw-sql",
               message:
-                `This raw SQL touches "${t[1]}", which is tenant-owned, and no ` +
-                `"${cfg.column}" appears anywhere in the statement.`,
+                'This raw SQL touches "' +
+                t[1] +
+                '", which is tenant-owned, and no "' +
+                c.column +
+                '" appears anywhere in the statement.',
               fix:
-                `Add the ${cfg.column} predicate as a bound parameter, never string ` +
-                `interpolation. If the query is deliberately cross-tenant, acknowledge it.`,
+                "Add the " +
+                c.column +
+                " predicate as a bound parameter, never string interpolation. " +
+                "If the query is deliberately cross-tenant, acknowledge it.",
               severity: ERROR,
             })
           );
@@ -205,21 +245,21 @@ function statementAt(all, start) {
 
     for (let j = 0; j < line.length; j++) {
       const ch = line[j];
-      if (ch === "\\") { j++; continue; }
-      if (ch === "`") { inTemplate = !inTemplate; continue; }
+      if (ch === "\\") {
+        j++;
+        continue;
+      }
+      if (ch === "`") {
+        inTemplate = !inTemplate;
+        continue;
+      }
       if (inTemplate) continue;
-      if (ch === "(") { depth++; started = true; }
-      else if (ch === ")") { depth--; }
+      if (ch === "(") {
+        depth++;
+        started = true;
+      } else if (ch === ")") depth--;
     }
     if (started && depth <= 0) break;
   }
   return collected.join("\n");
-}
-
-function isCommentLine(line) {
-  return /^\s*(?:\/\/|\*\/|\*|\/\*)/.test(line);
-}
-
-function escapeRe(s) {
-  return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

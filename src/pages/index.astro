@@ -114,6 +114,74 @@ const description =
   </section>
 
   <section class="section">
+    <div class="wrap">
+      <p class="eyebrow">Measured, not claimed</p>
+      <h2>Run against a real production monorepo.</h2>
+      <p class="lede spaced">
+        1,209 files, 7.6 MB of source. Every finding was read by hand, which is the
+        only way to know whether a tool like this is worth running.
+      </p>
+
+      <div class="stats">
+        <div class="stat">
+          <span class="statNum">45 <span class="arrow">to</span> 13</span>
+          <p>
+            Blocking findings, after fixing the false positives. All 13 that remain
+            are real: four money conversions that break for zero-decimal currencies,
+            four float parses of currency, five dead documentation links.
+          </p>
+        </div>
+        <div class="stat">
+          <span class="statNum">291 <span class="arrow">to</span> 74<small>ms</small></span>
+          <p>
+            Total scan time, median of seven runs. The scope gate alone went 11x
+            faster once its alias matcher stopped being rebuilt on every line.
+          </p>
+        </div>
+      </div>
+
+      <p class="note wide">
+        The 32 false positives came in three families, and every one is now a test
+        asserting the gate stays quiet. Credential-shaped strings in spec files were
+        35% of all findings and every one was deliberate test data, so those
+        downgrade to warnings rather than being excluded, and a live Stripe key
+        still blocks even in a test. Percentages were being reported as currency
+        bugs, because <code>Math.round(x * 100)</code> is both. And a
+        <code>postgres://postgres:postgres@localhost</code> in a setup script's help
+        text is not a secret.
+      </p>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="wrap narrow">
+      <p class="eyebrow">Adopting it</p>
+      <h2>Two hundred existing problems is the normal case.</h2>
+      <p>
+        Switching on a new gate in a mature repository surfaces findings nobody is
+        going to fix before merging anything else. So the realistic choices become
+        not adding the gate, or adding it as a warning everyone learns to scroll
+        past. Both mean the rule is not enforced.
+      </p>
+      <pre class="scroll-x"><code>npx bouncer --baseline-write</code></pre>
+      <p>
+        That records what is already wrong. Those stop blocking; anything new blocks
+        immediately. The debt stays visible and countable, and the bleeding stops the
+        same afternoon.
+      </p>
+      <p>
+        The fingerprint is content-based rather than line-based, which is the detail
+        that decides whether a baseline survives. Keyed on line numbers, adding one
+        import at the top of a file re-reports every grandfathered finding at once,
+        in a pull request that had nothing to do with any of them, and the team stops
+        trusting the tool that same day. Keyed on the line's content, a finding
+        survives moving around and starts blocking again the moment somebody edits
+        that line, which is exactly when it deserves another look.
+      </p>
+    </div>
+  </section>
+
+  <section class="section">
     <div class="wrap narrow">
       <p class="eyebrow">How it is built</p>
       <h2>Four decisions that make gates survivable.</h2>
@@ -177,9 +245,12 @@ const description =
     <div class="wrap narrow">
       <p class="eyebrow">Use it</p>
       <h2>Two files and a workflow step.</h2>
-      <pre class="scroll-x"><code>npx bouncer                        # run every gate
-npx bouncer --only scope,money     # run some
-npx bouncer --json                 # machine output</code></pre>
+      <pre class="scroll-x"><code>npx bouncer                        # every gate, whole repository
+npx bouncer --changed              # only what this branch touched
+npx bouncer --only scope,money     # some of them
+npx bouncer --explain scope        # what a gate checks, and how to excuse a case
+npx bouncer --baseline-write       # grandfather what is already wrong
+npx bouncer --sarif                # GitHub code scanning</code></pre>
       <p>
         Configure the tenant-scoped models in <code>bouncer.config.json</code>, add one
         step to your workflow, and set <code>fetch-depth: 0</code> so the migration gate
@@ -307,6 +378,43 @@ npx bouncer --json                 # machine output</code></pre>
     margin: 0.875rem 0 0;
     font-size: 0.8125rem;
     color: var(--ink-soft);
+  }
+  .note.wide { max-width: 74ch; margin-top: 1.5rem; }
+
+  .stats {
+    display: grid;
+    gap: 0.875rem;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  }
+
+  .stat {
+    padding: 1.25rem;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--panel);
+  }
+  .stat p {
+    margin: 0.5rem 0 0;
+    font-size: 0.875rem;
+    color: var(--ink-soft);
+  }
+
+  .statNum {
+    display: block;
+    font-size: clamp(1.75rem, 4vw, 2.5rem);
+    font-weight: 640;
+    letter-spacing: -0.03em;
+    color: var(--accent);
+    line-height: 1.1;
+  }
+  .statNum small { font-size: 0.45em; font-weight: 550; }
+  .statNum .arrow {
+    font-size: 0.4em;
+    font-weight: 500;
+    color: var(--ink-faint);
+    letter-spacing: 0;
+    padding-inline: 0.15em;
+    vertical-align: middle;
   }
 
   .grid {

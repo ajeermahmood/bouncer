@@ -1,4 +1,4 @@
-import { finding, lines, ERROR, WARN } from "./lib/finding.mjs";
+import { finding, ERROR, WARN } from "./lib/finding.mjs";
 
 /**
  * The window where the old code runs against the new schema.
@@ -13,13 +13,7 @@ import { finding, lines, ERROR, WARN } from "./lib/finding.mjs";
  * measured in hours.
  *
  * So a migration is not "does the new code work with this schema". It is "does
- * the OLD code survive this schema". Three statements break that, always:
- *
- *   DROP TABLE / DROP COLUMN   old code still selects it
- *   RENAME                     old code uses the old name; a rename is a drop and
- *                              an add wearing a trenchcoat
- *   ADD COLUMN NOT NULL        with no default, every insert the old code makes
- *                              fails
+ * the OLD code survive this schema". The statements below break that, always.
  *
  * The fix is always the same shape, and it is called expand-contract: add the new
  * thing, deploy code that writes both, backfill, deploy code that reads the new
@@ -28,6 +22,19 @@ import { finding, lines, ERROR, WARN } from "./lib/finding.mjs";
  *
  * Only NEW migrations are checked. History is already applied everywhere and is
  * none of this gate's business, so the caller passes in the added files.
+ *
+ * WHY THIS PARSES STATEMENTS RATHER THAN LINES. The first version matched line by
+ * line, and quietly missed the very thing it existed for:
+ *
+ *     ALTER TABLE orders
+ *       ADD COLUMN currency VARCHAR(3)
+ *       NOT NULL;
+ *
+ * `ADD COLUMN` and `NOT NULL` are on different lines, so no single line matched
+ * and the migration passed. Prisma emits single-line DDL, which is why it looked
+ * fine in testing; hand-written migrations wrap constantly. Statements are split
+ * on semicolons outside string literals, and each finding reports the line the
+ * statement started on.
  */
 export const name = "migration-safety";
 export const title = "Migration safety";
@@ -43,7 +50,9 @@ const RULES = [
   },
   {
     rule: "migration/drop-column",
-    re: /\bDROP\s+(?:COLUMN\b|"?\w+"?\s*(?:,|;|$))/i,
+    // Postgres allows both `DROP COLUMN x` and the bare `DROP x` inside ALTER TABLE.
+    re: /\bDROP\s+(?:COLUMN\s+)?"?\w+"?(?=\s*(?:,|;|$|\bCASCADE\b|\bRESTRICT\b))/i,
+    guard: /\bALTER\s+TABLE\b/i,
     message: "Dropping a column. Any SELECT * or explicit read in the old version fails immediately.",
     fix: "Stop selecting it in this release, ship, then drop it in the next one.",
   },
@@ -55,23 +64,37 @@ const RULES = [
   },
   {
     rule: "migration/add-not-null",
-    // NOT NULL on an added column, with no DEFAULT anywhere in the statement.
-    re: /\bADD\s+(?:COLUMN\s+)?(?!.*\bDEFAULT\b).*\bNOT\s+NULL\b/i,
+    re: /\bADD\s+(?:COLUMN\s+)?(?:IF\s+NOT\s+EXISTS\s+)?(?!.*\bDEFAULT\b)[\s\S]*?\bNOT\s+NULL\b/i,
     message: "Adding a NOT NULL column with no default. Every insert from the old version fails.",
     fix: "Add it nullable with a default, backfill, then tighten to NOT NULL in a later migration.",
   },
   {
+    rule: "migration/set-not-null",
+    re: /\bALTER\s+COLUMN\s+"?\w+"?\s+SET\s+NOT\s+NULL\b/i,
+    message:
+      "Tightening an existing column to NOT NULL. The old version can still insert rows without it, and on Postgres this also takes a full table scan under an exclusive lock.",
+    fix: "Confirm no code path writes a null, backfill any that exist, and add a CHECK ... NOT VALID first if the table is large.",
+  },
+  {
     rule: "migration/type-narrowing",
-    re: /\bALTER\s+COLUMN\b.*\bTYPE\b.*\b(?:VARCHAR|CHAR)\s*\(\s*\d+\s*\)/i,
+    re: /\bALTER\s+COLUMN\b[\s\S]*?\bTYPE\b[\s\S]*?\b(?:VARCHAR|CHAR)\s*\(\s*\d+\s*\)/i,
     message: "Narrowing a column type can reject rows the old version still writes.",
     fix: "Widen freely; narrow only after you are certain nothing writes the longer value.",
     severity: WARN,
   },
   {
     rule: "migration/blocking-index",
-    re: /\bCREATE\s+(?:UNIQUE\s+)?INDEX\s+(?!CONCURRENTLY)/i,
-    message: "Creating an index without CONCURRENTLY takes a write lock on the table for the duration.",
-    fix: "Use CREATE INDEX CONCURRENTLY on a table that takes writes in production.",
+    re: /\bCREATE\s+(?:UNIQUE\s+)?INDEX\b(?![\s\S]*\bCONCURRENTLY\b)/i,
+    message: "Creating an index without CONCURRENTLY holds a write lock on the table for the whole build.",
+    fix: "Use CREATE INDEX CONCURRENTLY on any table that takes writes in production.",
+    severity: WARN,
+  },
+  {
+    rule: "migration/validated-fk",
+    re: /\bADD\s+CONSTRAINT\b[\s\S]*?\b(?:FOREIGN\s+KEY|CHECK)\b(?![\s\S]*\bNOT\s+VALID\b)/i,
+    message:
+      "Adding a validated constraint scans the whole table under a lock that blocks writes for the duration.",
+    fix: "Add it NOT VALID, then VALIDATE CONSTRAINT in a separate migration, which takes a far weaker lock.",
     severity: WARN,
   },
 ];
@@ -86,6 +109,109 @@ const RULES = [
 const ACK = /--\s*bouncer-ok\(migration\)\s*:\s*\S+/i;
 
 /**
+ * Split SQL into statements, remembering where each began.
+ *
+ * Handles the three things that actually appear in migration files and would
+ * otherwise split a statement in the wrong place: line comments, single-quoted
+ * literals (including the doubled-quote escape), and dollar-quoted bodies used
+ * by functions and triggers.
+ *
+ * @returns {{sql: string, line: number}[]}
+ */
+export function statements(text) {
+  const out = [];
+  let buf = "";
+  let line = 1;
+  let startLine = 1;
+  let i = 0;
+  let started = false;
+
+  const push = () => {
+    if (buf.trim()) out.push({ sql: buf, line: startLine });
+    buf = "";
+    started = false;
+  };
+
+  while (i < text.length) {
+    const ch = text[i];
+
+    if (ch === "\n") {
+      line++;
+      buf += ch;
+      i++;
+      continue;
+    }
+
+    // -- line comment
+    if (ch === "-" && text[i + 1] === "-") {
+      while (i < text.length && text[i] !== "\n") i++;
+      continue;
+    }
+
+    // /* block comment */
+    if (ch === "/" && text[i + 1] === "*") {
+      i += 2;
+      while (i < text.length && !(text[i] === "*" && text[i + 1] === "/")) {
+        if (text[i] === "\n") line++;
+        i++;
+      }
+      i += 2;
+      continue;
+    }
+
+    // 'literal', with '' as the escape
+    if (ch === "'") {
+      buf += ch;
+      i++;
+      while (i < text.length) {
+        if (text[i] === "'" && text[i + 1] === "'") {
+          buf += "''";
+          i += 2;
+          continue;
+        }
+        if (text[i] === "'") break;
+        if (text[i] === "\n") line++;
+        buf += text[i];
+        i++;
+      }
+      buf += "'";
+      i++;
+      continue;
+    }
+
+    // $tag$ ... $tag$
+    const dollar = /^\$(\w*)\$/.exec(text.slice(i, i + 32));
+    if (dollar) {
+      const tag = dollar[0];
+      buf += tag;
+      i += tag.length;
+      const end = text.indexOf(tag, i);
+      const body = end === -1 ? text.slice(i) : text.slice(i, end);
+      for (const c of body) if (c === "\n") line++;
+      buf += body + tag;
+      i = end === -1 ? text.length : end + tag.length;
+      continue;
+    }
+
+    if (ch === ";") {
+      buf += ch;
+      push();
+      i++;
+      continue;
+    }
+
+    if (!started && !/\s/.test(ch)) {
+      started = true;
+      startLine = line;
+    }
+    buf += ch;
+    i++;
+  }
+  push();
+  return out;
+}
+
+/**
  * @param {{path: string, text: string}[]} addedMigrations only files ADDED vs the base branch
  */
 export function scan(addedMigrations) {
@@ -94,24 +220,21 @@ export function scan(addedMigrations) {
     if (!/\.sql$/i.test(file.path)) continue;
     if (ACK.test(file.text)) continue;
 
-    const all = lines(file.text);
-    for (let i = 0; i < all.length; i++) {
-      const line = all[i];
-      if (/^\s*--/.test(line)) continue;
-
+    for (const stmt of statements(file.text)) {
       for (const r of RULES) {
-        if (!r.re.test(line)) continue;
+        if (r.guard && !r.guard.test(stmt.sql)) continue;
+        if (!r.re.test(stmt.sql)) continue;
         out.push(
           finding({
             path: file.path,
-            line: i + 1,
+            line: stmt.line,
             rule: r.rule,
             message: r.message,
             fix: r.fix,
             severity: r.severity ?? ERROR,
           })
         );
-        break;
+        break; // one finding per statement; rules are ordered most severe first
       }
     }
   }

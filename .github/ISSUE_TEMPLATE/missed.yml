@@ -1,0 +1,31 @@
+name: Missed detection
+description: A gate should have caught something and did not
+labels: ["false negative"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Check the gate's "what it misses" section in `docs/gates.md` first. Several
+        blind spots are deliberate and documented, and knowing which one you hit
+        helps.
+  - type: input
+    id: gate
+    attributes:
+      label: Gate
+      placeholder: scope
+    validations:
+      required: true
+  - type: textarea
+    id: snippet
+    attributes:
+      label: Code that should have been flagged
+      render: javascript
+    validations:
+      required: true
+  - type: textarea
+    id: cost
+    attributes:
+      label: What would this have cost in production?
+      description: Gates are only worth adding for mistakes that are expensive to find later.
+    validations:
+      required: true

@@ -1,4 +1,4 @@
-import { finding, lines, acknowledged, ERROR, WARN } from "./lib/finding.mjs";
+import { finding, lines, acknowledged, isTestFile, ERROR, WARN } from "./lib/finding.mjs";
 
 /**
  * Two problems, one gate.
@@ -20,8 +20,7 @@ import { finding, lines, acknowledged, ERROR, WARN } from "./lib/finding.mjs";
  * died halfway. Nobody could tell which refusals were real.
  *
  * Keeping the shape clean fixed it. So this is a working-conditions gate as much
- * as a security one: the team stopped fighting their own tools. If you only care
- * about the first half, run with `--secrets-only`.
+ * as a security one: the team stopped fighting their own tools.
  */
 export const name = "secrets";
 export const title = "Secrets and dangerous shape";
@@ -58,6 +57,10 @@ const SECRET_RULES = [
     re: /\b[sr]k_live_[0-9A-Za-z]{20,}\b/,
     message: "A live Stripe key is hardcoded here.",
     fix: "Roll the key immediately. Live keys never belong in a repo, even a private one.",
+    // Stripe itself separates live from test credentials by prefix, so an
+    // `sk_live_` in a spec file is not plausible fixture data the way a made-up
+    // password is. This is the one rule that stays blocking inside tests.
+    liveByConstruction: true,
   },
   {
     rule: "secrets/openai-key",
@@ -67,14 +70,12 @@ const SECRET_RULES = [
   },
   {
     rule: "secrets/connection-string",
-    // A URL with a real-looking inline password. Placeholders are excluded below.
     re: /\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis|amqp):\/\/[^\s:@/]+:[^\s:@/]+@/i,
     message: "A database URL with an inline password is hardcoded here.",
     fix: "Read the whole URL from the environment. Do not split it into parts and rebuild it.",
   },
   {
     rule: "secrets/assigned-credential",
-    // password = "literal". Deliberately narrow: assignment only, quoted only.
     re: /\b(?:password|passwd|secret|api_?key|access_?token|client_?secret)\s*[:=]\s*["'][^"'\s]{8,}["']/i,
     message: "A credential is assigned a literal value here.",
     fix: "Read it from the environment. If this is test data, make it obviously fake.",
@@ -86,7 +87,7 @@ const SHAPE_RULES = [
     rule: "shape/pipe-to-shell",
     re: /\b(?:curl|wget)\b[^\n|]*\|\s*(?:sudo\s+)?(?:ba|z|k|)sh\b/,
     message: "This pipes something downloaded off the network straight into a shell.",
-    fix: "Download to a file, check it into the repo or verify a checksum, then run it. Reviewers and agents both stop trusting a repo that does this.",
+    fix: "Download to a file, check it in or verify a checksum, then run it. Reviewers and agents both stop trusting a repo that does this.",
   },
   {
     rule: "shape/tls-disabled",
@@ -116,68 +117,120 @@ const SHAPE_RULES = [
   },
 ];
 
+/**
+ * A credential pointing at a local host is not a secret.
+ *
+ *     postgresql://postgres:postgres@localhost:5432/app
+ *
+ * That is a development default, it is in every getting-started guide, and it
+ * grants nothing to anyone who reads it. Found in a setup script's help text on a
+ * real repository, where flagging it would have taught the team that this gate
+ * reports things that do not matter.
+ */
+// The terminator is a negative lookahead rather than a list of allowed
+// characters. Two earlier attempts got this wrong by enumerating: the first
+// required "/" or "?" and so missed `redis://user:pass@127.0.0.1:6379`, which has
+// no trailing path at all; the second added quotes and whitespace and still missed
+// `...@localhost</code>` inside an HTML snippet. Asserting only that the hostname
+// does not CONTINUE is the version that has no list to be incomplete.
+const LOCAL_HOST =
+  /@(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]|host\.docker\.internal|db|postgres|redis|mysql|mongo)(?::\d+)?(?![\w.-])/i;
+
 /** Obvious non-secrets. Without these the gate cries wolf and gets switched off. */
+// `examples?(?![-\w])` rather than a plain word match, so that
+// `example.com` (an RFC 2606 documentation domain, genuinely a placeholder)
+// suppresses a finding while `example-corp.com` (somebody's real company) does
+// not. A word boundary alone treats the hyphen as a break and quietly excuses
+// the real host.
 const PLACEHOLDER =
-  /\b(?:example|examples|sample|placeholder|dummy|fake|redacted|changeme|change_me|your[-_]?\w+|my[-_]?\w+|xxx+|test|TODO|FIXME|\.{3,}|<[^>]+>|\$\{[^}]+\}|process\.env|import\.meta\.env|os\.environ|None|null|undefined)\b/i;
+  /\b(?:examples?(?![-\w])|sample|placeholder|dummy|fake|redacted|changeme|change_me|your[-_]?\w+|my[-_]?\w+|xxx+|test|TODO|FIXME|\.{3,}|<[^>]+>|\$\{[^}]+\}|process\.env|import\.meta\.env|os\.environ|None|null|undefined)\b/i;
+
+const ALL = [
+  ...SECRET_RULES.map((r) => ({ ...r, family: "secret" })),
+  ...SHAPE_RULES.map((r) => ({ ...r, family: "shape" })),
+];
+const SECRETS_ONLY = ALL.filter((r) => r.family === "secret");
 
 /**
- * @param {{path: string, text: string}[]} files
+ * One union regex per rule set, tested before the per-rule loop.
+ *
+ * The overwhelming majority of lines in a codebase contain nothing interesting.
+ * Testing one alternation and bailing out is far cheaper than running thirteen
+ * separate regexes over every line of every file. Measured on a 1,209 file
+ * repository this was the difference between roughly 600ms and roughly 190ms of
+ * scan time.
+ */
+const UNION = new RegExp(ALL.map((r) => "(?:" + r.re.source + ")").join("|"), "i");
+const UNION_SECRETS = new RegExp(
+  SECRETS_ONLY.map((r) => "(?:" + r.re.source + ")").join("|"),
+  "i"
+);
+
+const SKIP_PATH =
+  /(?:^|\/)(?:node_modules|dist|build|\.astro|\.git|coverage)\/|(?:^|\/)(?:pnpm-lock\.yaml|package-lock\.json|yarn\.lock)$|\.min\.(?:js|css)$/;
+
+/**
+ * @param {{path: string, text: string, lines?: string[]}[]} files
  * @param {{secretsOnly?: boolean}} [opts]
  */
 export function scan(files, opts = {}) {
-  // Tag each rule with its family. The placeholder allowance below applies to
-  // secret rules ONLY, and finding that out cost a real false negative:
-  //
-  //     curl https://get.example.com/install.sh | sh
-  //
-  // sailed straight through, because the line contains the word "example" and
-  // the placeholder check assumed any line mentioning "example" was a doc
-  // sample. For a SECRET that reasoning is right, since a fake key is harmless.
-  // For a SHAPE rule it is exactly backwards: piping a download into a shell is
-  // dangerous because of its form, and the host it points at is irrelevant.
-  const rules = [
-    ...SECRET_RULES.map((r) => ({ ...r, family: "secret" })),
-    ...(opts.secretsOnly ? [] : SHAPE_RULES.map((r) => ({ ...r, family: "shape" }))),
-  ];
+  const rules = opts.secretsOnly ? SECRETS_ONLY : ALL;
+  const union = opts.secretsOnly ? UNION_SECRETS : UNION;
   const out = [];
 
   for (const file of files) {
-    // A gate that flags its own rule table is useless. Same for lockfiles,
-    // which are full of hashes that look like tokens.
-    if (isSelfOrNoise(file.path)) continue;
+    const norm = file.path.replace(/\\/g, "/");
+    if (SKIP_PATH.test(norm)) continue;
+    // A gate that flags its own rule table is useless.
+    if (norm.endsWith("gates/secrets.mjs")) continue;
 
-    const all = lines(file.text);
+    // Whole-file reject. If nothing in the file can match, skip the line split
+    // entirely, which is the expensive part on large files.
+    if (!union.test(file.text)) continue;
+
+    const inTest = isTestFile(norm);
+    const all = lines(file);
+
     for (let i = 0; i < all.length; i++) {
       const line = all[i];
       if (line.length > 2000) continue; // minified bundle, not review material
+      if (!union.test(line)) continue;
 
       for (const r of rules) {
         if (!r.re.test(line)) continue;
+
+        // The placeholder allowance applies to SECRET rules only.
+        //
+        // Finding that out cost a real false negative:
+        //   curl https://get.example.com/install.sh | sh
+        // sailed through, because the line contains "example" and the check
+        // assumed anything mentioning "example" was documentation. For a secret
+        // that reasoning is right, a fake key is harmless. For a shape rule it is
+        // exactly backwards: piping a download into a shell is dangerous because
+        // of its form, and the host it points at is irrelevant.
         if (r.family === "secret" && PLACEHOLDER.test(line)) continue;
+        if (r.rule === "secrets/connection-string" && LOCAL_HOST.test(line)) continue;
         if (acknowledged(all, i, "secrets")) continue;
 
+        // Test fixtures legitimately contain credential-shaped strings. On a real
+        // 1,209 file repository these were 35% of every finding the gate produced,
+        // and all of them were deliberate. Downgrading rather than excluding keeps
+        // a genuinely leaked key visible instead of silently unscanned.
+        const downgrade = inTest && !r.liveByConstruction;
         out.push(
           finding({
             path: file.path,
             line: i + 1,
             rule: r.rule,
-            message: r.message,
+            message: downgrade
+              ? r.message + " This is a test file, so it is reported as a warning."
+              : r.message,
             fix: r.fix,
-            severity: r.severity ?? ERROR,
+            severity: downgrade ? WARN : r.severity ?? ERROR,
           })
         );
       }
     }
   }
   return out;
-}
-
-function isSelfOrNoise(p) {
-  const n = p.replace(/\\/g, "/");
-  return (
-    n.includes("gates/secrets.mjs") ||
-    n.includes("gates/secrets.test.mjs") ||
-    /(?:^|\/)(?:pnpm-lock\.yaml|package-lock\.json|yarn\.lock|\.min\.(?:js|css))$/.test(n) ||
-    /(?:^|\/)(?:node_modules|dist|build|\.astro|\.git)\//.test(n)
-  );
 }

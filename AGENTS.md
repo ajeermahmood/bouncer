@@ -8,6 +8,9 @@ Bouncer is a set of CI gates. Each gate is a pure function that takes files and
 returns findings. The gates are the product; the website in `src/` is
 documentation for them.
 
+Deeper reading, in order of usefulness: [docs/architecture.md](docs/architecture.md),
+[docs/gates.md](docs/gates.md), [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## The one rule that matters here
 
 **A gate must never fail open.**
@@ -18,8 +21,14 @@ return an empty array and let the build go green. "We looked and it was fine" an
 "we could not look" are different answers, and only one of them is safe to merge
 on.
 
-If you are adding a code path where a gate returns no findings, ask which of
-those two things just happened, and make the output say so.
+This has already gone wrong once here, and it is worth knowing how, because the
+failure was invisible: a shallow CI clone has no base ref, so no migration looked
+new, so the gate printed "no new migrations in this change" and everybody assumed
+migrations were being checked. `skipWhen` now returns a reason string precisely so
+those two cases cannot render the same.
+
+If you are adding a code path where a gate returns no findings, ask which of those
+two things just happened, and make the output say so.
 
 ## Where a rule belongs
 
@@ -29,44 +38,65 @@ hold it:
 | Kind of rule | Where | Why |
 |---|---|---|
 | Formatting, import order | Formatter | Deterministic, already solved |
-| Types, null safety | Compiler, strict mode | Free and runs everywhere |
+| Types, null safety | Compiler, strict mode | Free, and it runs in the editor |
 | Taste, context, intent | This file | A machine cannot check taste |
 | Wrong is expensive | **A gate in `gates/`** | Only this category actually holds |
 
-A rule in this file that you would be upset to find broken in production is in
-the wrong place. Move it into a gate.
+A rule in this file that you would be upset to find broken in production is in the
+wrong place. Move it into a gate.
 
 ## Gates are pure
 
 A gate imports from `./lib/finding.mjs` and nothing else. No `node:fs`, no
 `child_process`, no `process.env`, no printing.
 
-This is not style. The same functions run in three places:
+This is not style. The same functions run in four places:
 
-- `bin/bouncer.mjs`, which reads from disk, in CI
-- `functions/api/scan.ts`, a Cloudflare Worker, where there is no filesystem
-- the tests, which pass string literals
+- `bin/bouncer.mjs`, the CLI, which reads from disk
+- `functions/api/scan.js`, a Cloudflare Worker, where no filesystem exists
+- `server/index.mjs`, a Node service on Railway
+- `src/components/Playground.tsx`, in the browser
 
 If a gate needs git history, it takes the history as an argument. The caller
 decides where it comes from. See `migration-safety`.
 
+## Precision is the product
+
+Speed is easy. Not crying wolf is what decides whether any of this survives a
+month on a real team.
+
+When you touch a matcher, run it against a real codebase before you ship it:
+
+```bash
+node bin/bouncer.mjs --only <gate> --root ../some-real-repo
+```
+
+Read every finding. If more than a handful are wrong, the rule is too broad.
+
+Three false-positive families have already been found this way and each is now a
+named test: credential fixtures in spec files, percentages that look like money
+conversions, and local development credentials. Do not reintroduce them.
+
 ## Adding a gate
 
 1. New file in `gates/`, exporting `name`, `title`, `summary`, `scan`.
-2. Register it in `gates/index.mjs` with what it `needs`.
-3. Tests in `tests/gates.test.mjs`. **Test that it stays quiet**, not only that
-   it fires. At least one negative test per rule. A gate with false positives is
-   worse than no gate, because it gets switched off and everyone still feels
-   covered.
-4. Add a card in `src/pages/index.astro` so it is documented where people look.
+2. Register it in `gates/index.mjs` with what it `needs`, and a `skipWhen` that
+   returns a reason string if it can be inapplicable.
+3. Tests in `tests/gates.test.mjs`. **Test that it stays quiet**, not only that it
+   fires. At least one negative test per rule.
+4. Document it in `docs/gates.md`, including what it misses.
+
+Full version in [CONTRIBUTING.md](CONTRIBUTING.md). The
+[`new-gate`](.claude/skills/new-gate/SKILL.md) skill walks through it, including
+the part where it tells you the rule should not be a gate at all.
 
 ## Findings
 
 - Report a location and a rule id. **Never include the matched text.** A secret
   scanner that quotes what it found writes the secret into the CI log, which is
   more public than the file it came from.
-- Every finding needs a `fix` that says what to do instead. "This is wrong" with
-  no way forward is how a gate earns its reputation as an obstacle.
+- Every finding needs a `fix` that says what to do instead, actionable by somebody
+  who has never seen this gate.
 - `error` blocks the merge. `warn` does not. Choose `warn` when you are not
   confident enough to stop someone's afternoon.
 
@@ -78,26 +108,35 @@ Every gate honours a comment on the offending line or the line above:
 // bouncer-ok(scope): admin dashboard reports across all tenants by design
 ```
 
-The reason is required. A bare `bouncer-ok(scope):` does not suppress anything.
-That is the whole design: the escape hatch is easy to use and impossible to use
-silently, so the justification ends up in the file where the next reader finds
-it.
+The reason is required. A bare `bouncer-ok(scope):` suppresses nothing. That is
+the whole design: easy to use, impossible to use silently, and the justification
+ends up in the file where the next reader finds it.
 
-Do not add a config option that disables a gate globally. If a gate is wrong
-often enough to need that, fix the gate.
+Do not add a config option that disables a gate globally. If a gate is wrong often
+enough to need that, fix the gate. File-level `exclude` exists, and the runner
+prints how many files each pattern removed on every run so the list cannot grow
+quietly.
 
 ## Things that will waste your time
 
-- Windows checkouts. `git ls-files` returns forward slashes, but `path.join` does
+- **Windows checkouts.** `git ls-files` returns forward slashes, `path.join` does
   not. Normalise with `.replace(/\\/g, "/")` before comparing paths. An earlier
   version of the doc-links gate passed on Windows and silently checked almost
   nothing on Linux.
-- Writing a gate that scans its own rule table and flags itself. Whole-line
-  comments are skipped for this reason.
-- `npm ci` needs `package-lock.json` committed. It is.
+- **Writing a gate that scans its own rule table and flags itself.** Whole-line
+  comments are skipped for this reason. Use `isCommentLine`.
+- **Control characters in source.** An early glob compiler used NUL as a
+  placeholder token. It worked, and it made the file read as binary to `grep` and
+  to Bouncer's own file reader, so the tool could not scan its own runner.
+- **Regex-heavy edits through a shell heredoc.** Doubled backslashes get eaten and
+  the result is a regex that silently matches the wrong thing. Write the file
+  directly.
+- **`npm ci` needs `package-lock.json` committed.** It is.
 
 ## Conventions
 
 - ES modules, `.mjs` for anything that runs in Node directly.
 - No dependencies in `gates/`. It must run with nothing installed.
+- No em dashes in prose or comments.
+- Comments explain why, not what.
 - Plain SCSS in the site, no framework.
