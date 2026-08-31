@@ -1,0 +1,124 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# The PR comment step needs write access. Everything else is read-only, and the
+# token is scoped down here rather than left at the repository default.
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  gates:
+    name: Gates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Without full history there is no merge-base, so the migration gate
+          # cannot tell which .sql files are new. It reports SKIPPED rather than
+          # PASSED in that case, which is honest but useless. This one line is
+          # what makes that gate real.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # Gates first. They are the fastest thing here and the most likely to fail,
+      # and a contributor should not wait through a build to be told about a
+      # hardcoded password on line 3.
+      - name: Bouncer
+        id: bouncer
+        run: node bin/bouncer.mjs --base origin/${{ github.base_ref || 'main' }}
+
+      # Runs even when the gates failed, so the PR comment can explain what
+      # happened instead of leaving a red X and a link to a log.
+      - name: Collect findings
+        if: always() && github.event_name == 'pull_request'
+        run: node bin/bouncer.mjs --json --base origin/${{ github.base_ref }} > findings.json || true
+
+      - name: Explain on the PR
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let data;
+            try { data = JSON.parse(fs.readFileSync('findings.json', 'utf8')); }
+            catch { return; }
+
+            const findings = data.results.flatMap(r => r.findings);
+            const errors = findings.filter(f => f.severity === 'error');
+
+            // Nothing to say. Do not post "all good" on every push; a bot that
+            // comments on everything gets muted, and then it cannot tell you
+            // the one thing that mattered.
+            if (!errors.length) return;
+
+            const body = [
+              '**Bouncer stopped this one at the door.**',
+              '',
+              'Nothing here is a judgement about the change. These are the specific',
+              'mistakes that are expensive to find later, so we check them every time.',
+              '',
+              ...errors.map(f => [
+                `### \`${f.path}\` line ${f.line}`,
+                '',
+                f.message,
+                '',
+                f.fix ? `**What to do:** ${f.fix}` : '',
+              ].join('\n')),
+              '',
+              '---',
+              'If one of these is wrong for a good reason, write the reason in the code:',
+              '```',
+              '// bouncer-ok(<gate>): why this is fine here',
+              '```',
+              'The reason is required, and it stays in the file where the next person will read it.',
+            ].join('\n');
+
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const marker = '<!-- bouncer -->';
+
+            // Update one comment rather than adding a new one per push, so the
+            // conversation stays readable on a branch that takes ten commits.
+            const existing = (await github.rest.issues.listComments({ owner, repo, issue_number }))
+              .data.find(c => c.body.includes(marker));
+
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body: body + '\n' + marker });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body: body + '\n' + marker });
+            }
+
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+
+  build:
+    name: Build site
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build

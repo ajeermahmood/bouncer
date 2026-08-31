@@ -1,0 +1,12 @@
+{
+  "exclude": [
+    "tests/**",
+    "src/components/Playground.tsx"
+  ],
+  "scope": {
+    "models": ["order", "customer", "invoice", "subscription", "payment"],
+    "tables": ["orders", "customers", "invoices", "subscriptions", "payments"],
+    "column": "tenantId",
+    "rawAccessor": "raw"
+  }
+}

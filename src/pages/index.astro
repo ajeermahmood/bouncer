@@ -1,0 +1,362 @@
+---
+import Base from "../layouts/Base.astro";
+import Playground from "../components/Playground.tsx";
+import { GATES } from "../../gates/index.mjs";
+
+// The gate list on this page is imported from the registry rather than typed
+// out, so a gate cannot exist without appearing here, and this page cannot
+// describe a gate that was deleted.
+const gates = GATES.map((g) => ({ name: g.name, title: g.title, summary: g.summary }));
+
+const title = "Bouncer";
+const description =
+  "CI gates that let anyone on the team contribute to a codebase without being able to break it.";
+---
+
+<Base title={title} description={description}>
+  <header class="hero">
+    <div class="wrap">
+      <p class="eyebrow">Open source, MIT</p>
+      <h1>
+        Let anyone ship.<br />
+        Let nothing dangerous through.
+      </h1>
+      <p class="lede">
+        Bouncer is a small set of CI gates. They sit at the door of your main branch and
+        check the handful of mistakes that are cheap to catch now and expensive to find
+        later. Everyone passes through the same ones: senior engineers, the person in
+        marketing who edited a page, and the AI agent that opened the pull request at
+        two in the morning.
+      </p>
+      <div class="cta">
+        <a class="btn" href="#try">Try it below</a>
+        <a class="btn btnGhost" href="https://github.com/ajeermahmood/bouncer">Source on GitHub</a>
+      </div>
+    </div>
+  </header>
+
+  <section class="section">
+    <div class="wrap narrow">
+      <p class="eyebrow">The problem</p>
+      <h2>More people can write code now. Review did not get faster.</h2>
+      <p>
+        Every company is discovering the same thing at once. A designer can produce a
+        working page. A support lead can fix their own copy. An agent can open twenty
+        pull requests before lunch. The bottleneck moved: it is no longer writing the
+        change, it is being confident the change is safe.
+      </p>
+      <p>
+        The usual answer is to review harder. That does not scale, and it puts the whole
+        safety system inside one tired person's attention. The other answer is to lock
+        contribution down to the people who already know where the mines are, which
+        wastes most of what just became possible.
+      </p>
+      <p>
+        Gates are the third answer. Write the expensive mistakes down once, as code, and
+        let the machine check every change forever. Then a contributor does not need to
+        know that orders are tenant-scoped, or that a float cannot hold money. They will
+        be told, by name, on the line, with what to do instead.
+      </p>
+
+      <div class="rulebox">
+        <p class="eyebrow">Where a rule belongs</p>
+        <div class="scroll-x">
+          <table>
+            <thead>
+              <tr><th>Kind of rule</th><th>Where it goes</th><th>Why</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Formatting, import order</td><td>Formatter</td><td>Deterministic, already solved</td></tr>
+              <tr><td>Types, null safety</td><td>Compiler, strict mode</td><td>Free, and it runs in the editor</td></tr>
+              <tr><td>Taste, context, intent</td><td><code>AGENTS.md</code></td><td>A machine cannot check taste</td></tr>
+              <tr class="hl"><td>Wrong is expensive</td><td><strong>A gate</strong></td><td>Only this category actually holds</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="note">
+          If a rule lives in your instructions file and you would be upset to find it
+          broken in production, it is in the wrong row.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="try">
+    <div class="wrap">
+      <p class="eyebrow">Try it</p>
+      <h2>Break something on purpose.</h2>
+      <p class="lede spaced">
+        This runs the real gate modules, not a demo copy of them. Pick an example or
+        paste your own code.
+      </p>
+      <Playground client:load />
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="wrap">
+      <p class="eyebrow">What it checks</p>
+      <h2>Five gates.</h2>
+      <p class="lede spaced">
+        Each one exists because of a specific bug that is quiet, plausible, and costly.
+        None of them is a style opinion.
+      </p>
+      <div class="grid">
+        {gates.map((g) => (
+          <article class="card">
+            <h3>{g.title}</h3>
+            <p class="gateName">{g.name}</p>
+            <p>{g.summary}</p>
+          </article>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="wrap narrow">
+      <p class="eyebrow">How it is built</p>
+      <h2>Four decisions that make gates survivable.</h2>
+
+      <div class="rule">
+        <h3>A gate never fails open.</h3>
+        <p>
+          If a gate cannot do its job, because there is no git history or a config is
+          missing, it reports <strong>skipped</strong> and says why. It never returns
+          nothing and lets the build go green. "We looked and it was fine" and "we could
+          not look" are different answers, and only one of them is safe to merge on.
+        </p>
+      </div>
+
+      <div class="rule">
+        <h3>The escape hatch requires a reason.</h3>
+        <p>Every gate honours a comment on the line, or the line above it:</p>
+        <pre class="scroll-x"><code>// bouncer-ok(scope): finance dashboard, spans all tenants by design</code></pre>
+        <p>
+          A bare <code>bouncer-ok(scope):</code> with nothing after it suppresses nothing.
+          That single requirement is what stops the hatch decaying into a blanket ignore,
+          and it puts the justification in the file, where the next reader finds it
+          instead of in a pull request nobody will open again.
+        </p>
+      </div>
+
+      <div class="rule">
+        <h3>Findings never quote what they found.</h3>
+        <p>
+          A secret scanner that prints the matched text writes the secret into the CI
+          log, which is usually more public than the file it came from. So a finding
+          carries a location and a rule id, and a human opens the file. That is a
+          deliberate cost.
+        </p>
+      </div>
+
+      <div class="rule">
+        <h3>Gates are pure functions.</h3>
+        <p>
+          A gate takes files and returns findings. No filesystem, no git, no printing.
+          All the input gathering lives in the runner. That is why the same modules run
+          in CI, inside the Cloudflare Worker behind the playground above, and in the
+          tests, with no second implementation to drift.
+        </p>
+      </div>
+
+      <div class="rule">
+        <h3 class="quiet">And one thing that is not a decision, but is the point</h3>
+        <p>
+          Half the test suite asserts that gates stay <em>quiet</em>. That is the half
+          that matters. Catching the bad case is easy. Not firing on the twenty
+          near-misses around it is the difference between a gate people keep and a gate
+          that gets switched off in a month, leaving everyone feeling covered while
+          nothing is checked.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="wrap narrow">
+      <p class="eyebrow">Use it</p>
+      <h2>Two files and a workflow step.</h2>
+      <pre class="scroll-x"><code>npx bouncer                        # run every gate
+npx bouncer --only scope,money     # run some
+npx bouncer --json                 # machine output</code></pre>
+      <p>
+        Configure the tenant-scoped models in <code>bouncer.config.json</code>, add one
+        step to your workflow, and set <code>fetch-depth: 0</code> so the migration gate
+        can tell which files are new. That last line is the difference between a real
+        check and one that quietly reports skipped forever.
+      </p>
+      <p>
+        Adding your own gate is a new file in <code>gates/</code>, an entry in the
+        registry, and a test that it stays quiet. The
+        <code>.claude/skills/new-gate</code> skill walks an agent through it, including
+        the part where it tells you the rule you asked for should not be a gate at all.
+      </p>
+    </div>
+  </section>
+
+  <footer class="foot">
+    <div class="wrap">
+      <p>
+        Built by <a href="https://ajeer-portfolio.vercel.app">Ajeer Mohammed</a>. The
+        patterns come from running these gates on a multi-tenant platform where a missed
+        one meant a customer seeing another customer's orders.
+      </p>
+      <p class="dim">
+        MIT licensed. <a href="https://github.com/ajeermahmood/bouncer">Source</a>.
+        This site is Astro on Cloudflare Pages, and its own pull requests go through the
+        gates it describes.
+      </p>
+    </div>
+  </footer>
+</Base>
+
+<style lang="scss">
+  .hero {
+    padding-block: clamp(4rem, 12vw, 8rem) clamp(3rem, 8vw, 5rem);
+    background:
+      radial-gradient(120% 80% at 50% -10%, var(--accent-soft) 0%, transparent 60%);
+  }
+
+  h1 {
+    font-size: clamp(2.25rem, 6.5vw, 4rem);
+    margin-bottom: 1.25rem;
+    max-width: 18ch;
+  }
+
+  h2 {
+    font-size: clamp(1.5rem, 3.2vw, 2.125rem);
+    margin-bottom: 1rem;
+    max-width: 24ch;
+  }
+
+  h3 {
+    font-size: 1.0625rem;
+    margin-bottom: 0.4rem;
+  }
+
+  .narrow { max-width: 720px; }
+
+  .lede.spaced { margin-bottom: 2rem; }
+
+  .cta {
+    display: flex;
+    gap: 0.625rem;
+    flex-wrap: wrap;
+    margin-top: 2rem;
+  }
+
+  .btn {
+    display: inline-block;
+    padding: 0.6rem 1.1rem;
+    border-radius: var(--radius);
+    background: var(--ink);
+    color: var(--paper);
+    text-decoration: none;
+    font-size: 0.9375rem;
+    font-weight: 550;
+    border: 1px solid var(--ink);
+  }
+  .btn:hover { opacity: 0.88; }
+
+  .btnGhost {
+    background: transparent;
+    color: var(--ink);
+    border-color: var(--line-strong);
+  }
+  .btnGhost:hover { border-color: var(--ink); opacity: 1; }
+
+  .rulebox {
+    margin-top: 2rem;
+    padding: 1.25rem;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--panel);
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.875rem;
+    min-width: 480px;
+  }
+
+  th {
+    text-align: left;
+    font-weight: 600;
+    color: var(--ink-faint);
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding: 0 0.75rem 0.5rem 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  td {
+    padding: 0.55rem 0.75rem 0.55rem 0;
+    border-bottom: 1px solid var(--line);
+    vertical-align: top;
+  }
+
+  tr.hl td {
+    background: var(--accent-soft);
+    color: var(--ink);
+  }
+
+  .note {
+    margin: 0.875rem 0 0;
+    font-size: 0.8125rem;
+    color: var(--ink-soft);
+  }
+
+  .grid {
+    display: grid;
+    gap: 0.875rem;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  }
+
+  .card {
+    padding: 1.125rem;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--panel);
+  }
+  .card p:last-child { margin-bottom: 0; font-size: 0.875rem; color: var(--ink-soft); }
+
+  .gateName {
+    font-family: var(--mono);
+    font-size: 0.6875rem;
+    color: var(--accent);
+    margin-bottom: 0.6rem;
+  }
+
+  .rule {
+    padding-top: 1.5rem;
+    margin-top: 1.5rem;
+    border-top: 1px solid var(--line);
+  }
+  .rule:first-of-type { border-top: 0; padding-top: 0.5rem; }
+  .rule p:last-child { margin-bottom: 0; }
+  .rule .quiet { color: var(--ink-faint); font-weight: 550; }
+
+  pre {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 0.875rem 1rem;
+    margin: 0 0 1rem;
+    line-height: 1.6;
+  }
+
+  code { color: var(--accent); }
+  pre code { color: var(--ink); }
+
+  .foot {
+    border-top: 1px solid var(--line);
+    padding-block: 2.5rem 3.5rem;
+    font-size: 0.875rem;
+    color: var(--ink-soft);
+  }
+  .foot p { max-width: 62ch; }
+  .foot .dim { color: var(--ink-faint); margin-bottom: 0; }
+</style>
