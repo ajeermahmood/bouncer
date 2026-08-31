@@ -386,6 +386,21 @@ describe("doc-links", () => {
     expect(docLinks.scan(at("README.md", "[g](docs%2Fguide.md)"), ["docs/guide.md"])).toHaveLength(0);
   });
 
+  it("does not report a root-absolute link with no extension as broken", () => {
+    // Found by running this gate over a Next.js site, where `/work/estate` is a
+    // route the renderer resolves against the deployment, not a file. The same
+    // syntax means repo-root on GitHub, so only the extension separates the two
+    // readings, and guessing wrong here fires on every content-driven website.
+    expect(docLinks.scan(at("blog/post.md", "[estate](/work/estate)"), repo)).toHaveLength(0);
+  });
+
+  it("still reports a root-absolute link to a missing document", () => {
+    expect(rules(docLinks.scan(at("blog/post.md", "[g](/docs/gone.md)"), repo))).toEqual([
+      "doc-links/broken",
+    ]);
+    expect(docLinks.scan(at("blog/post.md", "[g](/docs/guide.md)"), repo)).toHaveLength(0);
+  });
+
   it("does not report a link that climbs above the repository root", () => {
     // A monorepo doc legitimately pointing at a sibling package outside the git
     // root is not something this gate can judge, so it says nothing.

@@ -2,6 +2,16 @@
 
 Notable changes. Dates are the day the work was done.
 
+## 0.2.1 - 2026-08-31
+
+- `doc-links` no longer reports a root-absolute link with no file extension as
+  broken. Found by running the gate over a Next.js site, where `[estate](/work/estate)`
+  is a route the renderer resolves against the deployment rather than a file on
+  disk. On GitHub the same syntax means repo-root, so the notation is genuinely
+  ambiguous and only the extension separates the two readings. Requiring an
+  extension keeps coverage of real repo-root document links like `/docs/guide.md`
+  while dropping a false positive that would fire on every content-driven website.
+
 ## 0.2.0 - 2026-08-31
 
 The first version was correct on its own test fixtures. This one was run against a

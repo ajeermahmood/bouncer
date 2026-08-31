@@ -92,6 +92,19 @@ export function scan(files, repoFiles) {
       const target = hashAt === -1 ? raw : raw.slice(0, hashAt);
       if (!target) continue; // a bare "#anchor" link, same page
 
+      // A root-absolute link with no file extension is a site route, not a path.
+      //
+      // Found by running this gate over a Next.js portfolio, where `[estate](/work/estate)`
+      // was reported as broken. It is not: the renderer resolves it against the
+      // deployed site, and there is no file at `work/estate` by design. On GitHub
+      // the same syntax means repo-root, so the notation is genuinely ambiguous
+      // and only the extension separates the two readings.
+      //
+      // Requiring an extension keeps the real coverage, since a repo-root link to
+      // a document is written `/docs/guide.md`, while dropping a false positive
+      // class that would otherwise fire on every content-driven website.
+      if (target.startsWith("/") && !/\.[a-z0-9]{1,8}$/i.test(target)) continue;
+
       const resolved = resolvePath(baseDir, decodeTarget(target));
       if (resolved === null) continue; // escaped above the repo root; not ours to judge
       if (known.has(resolved) || dirs.has(resolved)) continue;
