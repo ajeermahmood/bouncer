@@ -1,0 +1,45 @@
+name: Action
+
+# Runs the published action against this repository, from the checked-out
+# action.yml rather than a tag, so a change to the action is tested by the PR
+# that makes it. The main CI runs the CLI from source; this runs the npm build,
+# which is what everyone else gets.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - action.yml
+      - .github/workflows/action.yml
+      - bin/**
+      - gates/**
+
+permissions:
+  contents: read
+
+jobs:
+  action:
+    name: Published action
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Run the action against this repository
+        id: bouncer
+        uses: ./
+        with:
+          version: latest
+
+      - name: Outputs are set
+        if: always()
+        run: |
+          test -s "${{ steps.bouncer.outputs.findings-file }}"
+          test -s "${{ steps.bouncer.outputs.sarif-file }}"
+          echo "exit-code=${{ steps.bouncer.outputs.exit-code }}"

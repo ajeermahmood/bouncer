@@ -81,12 +81,36 @@ codebase full of problems.
 }
 ```
 
-In GitHub Actions:
+In GitHub Actions, as an action:
 
 ```yaml
-- uses: actions/checkout@v4
-  with:
-    fetch-depth: 0     # without this the migration gate cannot see what is new
+permissions:
+  contents: read
+  security-events: write   # only needed for the code scanning upload
+
+steps:
+  - uses: actions/checkout@v4
+    with:
+      fetch-depth: 0       # without this the migration gate cannot see what is new
+  - uses: ajeermahmood/bouncer@v0
+    with:
+      version: "0.2.4"     # pin it; "latest" is for trying it out
+  - uses: github/codeql-action/upload-sarif@v3
+    if: always()
+    with:
+      sarif_file: bouncer.sarif
+      category: bouncer
+```
+
+The action runs the same CLI, writes `bouncer-findings.json` and `bouncer.sarif`
+even when the gates fail, and exits with the CLI's code, so `1` and `2` stay
+distinguishable in the log. Inputs: `version`, `base`, `changed`, `only`,
+`baseline`, `sarif`, `sarif-file`, `root`. It warns, by name, when the checkout
+is shallow.
+
+Or without the action, which is the same thing in one line:
+
+```yaml
 - run: npx bouncer-gates --base origin/${{ github.base_ref }}
 ```
 

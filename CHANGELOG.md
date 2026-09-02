@@ -2,6 +2,25 @@
 
 Notable changes. Dates are the day the work was done.
 
+## Unreleased
+
+### A GitHub Action
+
+`action.yml` at the repository root, so a consumer writes
+`uses: ajeermahmood/bouncer@v0` instead of copying the npx line and the SARIF
+plumbing. It is a composite action around the npm package, not a second
+implementation: the same CLI runs, with `version` pinned by the consumer.
+
+It writes `bouncer-findings.json` and a SARIF file even when the gates fail, so
+a later step can explain the failure on the PR. It exits with the CLI's own code,
+so `1` (findings) and `2` (the runner could not do its job) stay distinguishable,
+and it warns by name when the checkout is shallow, which is the one setup mistake
+that turns the migration gate into a permanent *skipped*.
+
+A second workflow, `.github/workflows/action.yml`, runs the action from the
+checked-out tree against this repository, so a change to the action is tested by
+the pull request that makes it.
+
 ## 0.2.4 - 2026-09-01
 
 An audit release. Nothing here was reported by a user; all of it came from

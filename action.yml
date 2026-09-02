@@ -1,0 +1,114 @@
+name: "Bouncer gates"
+description: "CI gates that block expensive mistakes before they merge: secrets, tenant scope, currency maths, migration safety, dead doc links."
+author: "Ajeer Mohammed"
+
+branding:
+  icon: "shield"
+  color: "purple"
+
+inputs:
+  version:
+    description: "bouncer-gates version to run from npm. Pin this in a real repository."
+    required: false
+    default: "latest"
+  base:
+    description: "Ref that 'changed' and 'new' are measured against. Defaults to the PR base branch, or main."
+    required: false
+    default: ""
+  changed:
+    description: "Scan only files that differ from the base ref."
+    required: false
+    default: "false"
+  only:
+    description: "Comma-separated gate names to run, e.g. scope,money. Empty runs every gate."
+    required: false
+    default: ""
+  baseline:
+    description: "Set to 'false' to ignore an existing baseline file."
+    required: false
+    default: "true"
+  sarif:
+    description: "Write a SARIF file for GitHub code scanning at the path given by sarif-file."
+    required: false
+    default: "true"
+  sarif-file:
+    description: "Where to write the SARIF file."
+    required: false
+    default: "bouncer.sarif"
+  root:
+    description: "Repository root to scan, relative to the workspace."
+    required: false
+    default: "."
+
+outputs:
+  exit-code:
+    description: "0 clean, 1 blocking findings, 2 the runner could not do its job."
+    value: ${{ steps.gates.outputs.exit-code }}
+  findings-file:
+    description: "Path to the JSON findings written by this run."
+    value: ${{ steps.gates.outputs.findings-file }}
+  sarif-file:
+    description: "Path to the SARIF file, when sarif is enabled."
+    value: ${{ steps.gates.outputs.sarif-file }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Run bouncer
+      id: gates
+      shell: bash
+      env:
+        INPUT_VERSION: ${{ inputs.version }}
+        INPUT_BASE: ${{ inputs.base }}
+        INPUT_CHANGED: ${{ inputs.changed }}
+        INPUT_ONLY: ${{ inputs.only }}
+        INPUT_BASELINE: ${{ inputs.baseline }}
+        INPUT_SARIF: ${{ inputs.sarif }}
+        INPUT_SARIF_FILE: ${{ inputs.sarif-file }}
+        INPUT_ROOT: ${{ inputs.root }}
+        GH_BASE_REF: ${{ github.base_ref }}
+      run: |
+        set -u
+
+        # The base ref decides what "new" means for the migration gate. Without
+        # full history there is no merge-base, and the gate reports SKIPPED. That
+        # is honest but useless, so say so up front rather than after the run.
+        base="${INPUT_BASE}"
+        if [ -z "$base" ]; then
+          base="origin/${GH_BASE_REF:-main}"
+        fi
+        if [ "$(git rev-parse --is-shallow-repository 2>/dev/null)" = "true" ]; then
+          echo "::warning::Shallow checkout. Add 'fetch-depth: 0' to actions/checkout or the migration gate cannot see which files are new."
+        fi
+
+        args=(--base "$base" --root "$INPUT_ROOT" --no-color)
+        [ "$INPUT_CHANGED" = "true" ] && args+=(--changed)
+        [ -n "$INPUT_ONLY" ] && args+=(--only "$INPUT_ONLY")
+        [ "$INPUT_BASELINE" = "false" ] && args+=(--no-baseline)
+
+        pkg="bouncer-gates@${INPUT_VERSION}"
+
+        # Human-readable run first, so the log reads like the CLI would.
+        set +e
+        npx --yes "$pkg" "${args[@]}"
+        code=$?
+        set -e
+
+        # Machine outputs are written even when the gates failed, so a later step
+        # can explain the failure on the PR instead of leaving a red X and a log.
+        npx --yes "$pkg" "${args[@]}" --json > bouncer-findings.json || true
+        echo "findings-file=bouncer-findings.json" >> "$GITHUB_OUTPUT"
+
+        if [ "$INPUT_SARIF" = "true" ]; then
+          npx --yes "$pkg" "${args[@]}" --sarif > "$INPUT_SARIF_FILE" || true
+          echo "sarif-file=$INPUT_SARIF_FILE" >> "$GITHUB_OUTPUT"
+        fi
+
+        echo "exit-code=$code" >> "$GITHUB_OUTPUT"
+
+        # Exit 2 is the tool failing, not the code. Both stop the merge, but a
+        # reader of the log should not confuse a broken runner with a broken PR.
+        if [ "$code" -eq 2 ]; then
+          echo "::error::bouncer could not do its job (exit 2). This is a runner problem, not a finding."
+        fi
+        exit "$code"
