@@ -24,7 +24,7 @@ import {
   validateBaseline,
 } from "../gates/lib/baseline.mjs";
 
-const VERSION = "0.2.4";
+const VERSION = "0.2.5";
 
 const HELP = `bouncer ${VERSION}
 CI gates that let anyone contribute without being able to break things.

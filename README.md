@@ -94,7 +94,7 @@ steps:
       fetch-depth: 0       # without this the migration gate cannot see what is new
   - uses: ajeermahmood/bouncer@v0
     with:
-      version: "0.2.4"     # pin it; "latest" is for trying it out
+      version: "0.2.5"     # pin it; "latest" is for trying it out
   - uses: github/codeql-action/upload-sarif@v3
     if: always()
     with:
