@@ -1,5 +1,5 @@
 name: "Bouncer gates"
-description: "CI gates that block expensive mistakes before they merge: secrets, tenant scope, currency maths, migration safety, dead doc links."
+description: "CI gates that block expensive mistakes before they merge: secrets, tenant scope, money maths, migrations, dead links."
 author: "Ajeer Mohammed"
 
 branding:
