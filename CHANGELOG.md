@@ -2,7 +2,7 @@
 
 Notable changes. Dates are the day the work was done.
 
-## Unreleased
+## 0.2.5 - 2026-09-03
 
 ### A GitHub Action
 
